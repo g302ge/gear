@@ -806,4 +806,18 @@ mod tests {
             assert_eq!(get_code(program.code_hash).unwrap(), code);
         });
     }
+
+    #[test]
+    fn tmp() {
+        let a: Vec<u8> = b"foobar".to_vec();
+        let mut b: Vec<u8> = Vec::new();
+        loop {
+            b.extend(&a[..]);
+            if b.len() > 20 {
+                break;
+            }
+        }
+        println!("a: {:?}, b: {:?}", a, b);
+        println!("a[0..]: {:?}, a[1..]: {:?}", &a[0..], &a[1..]);
+    }
 }

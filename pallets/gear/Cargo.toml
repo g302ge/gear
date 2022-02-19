@@ -55,6 +55,9 @@ tests-exit-init = { path = "../../tests/exit-init" }
 tests-exit-handle = { path = "../../tests/exit-handle" }
 tests-program-factory = { path = "../../tests/program-factory" }
 tests-proxy = { path = "../../tests/proxy" }
+tests-ncompose = { path = "../../tests/ncompose" }
+tests-mul-by-const = { path = "../../tests/mul-by-const" }
+tests-unchecked-mul = { path = "../../tests/unchecked-mul" }
 
 [features]
 default = ['std']
