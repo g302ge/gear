@@ -356,7 +356,7 @@ where
             Error::<T>::InsufficientBalance
         );
         *node.inner_value_mut().expect("Querying node with value") -= amount;
-        log::debug!("Spend {} of gas", amount);
+        log::debug!("Spent {} of gas", amount);
 
         // Save current node
         ValueView::<T>::mutate(key, |value| {
