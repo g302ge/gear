@@ -722,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "Supposed to fail"]
+    #[ignore = "Supposed to fail"]
     fn run_target_with_params() {
         let params = crate::SimpleParams {
             num_contracts: 14,
