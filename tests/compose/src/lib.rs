@@ -80,14 +80,14 @@ mod wasm {
                 hex::encode(self.contract_a.handle),
                 gas_limit / 2
             );
-            let output_a = self.contract_a.call(input, gas_limit / 2).await?;
+            let output_a = self.contract_a.call(input).await?;
             debug!(
                 "[0x{} compose::compose] Calling contract 0x{} with available gas: {}",
                 hex::encode(exec::program_id()),
                 hex::encode(self.contract_b.handle),
                 gas_limit / 2
             );
-            let output = self.contract_b.call(output_a, gas_limit / 2).await?;
+            let output = self.contract_b.call(output_a).await?;
             debug!(
                 "[0x{} compose::compose] Output: {:?}",
                 hex::encode(exec::program_id()),
@@ -110,7 +110,7 @@ mod wasm {
             }
         }
 
-        async fn call(&self, input: Vec<u8>, _gas_limit: u64) -> Result<Vec<u8>, &'static str> {
+        async fn call(&self, input: Vec<u8>) -> Result<Vec<u8>, &'static str> {
             let reply_bytes = msg::send_bytes_and_wait_for_reply(self.handle, &input[..], 0)
                 .await
                 .map_err(|_| "Error in async message processing")?;

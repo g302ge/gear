@@ -21,9 +21,9 @@ use codec::Encode;
 use common::DAGBasedLedger;
 use frame_support::dispatch::DispatchError;
 use gear_runtime::{Gear, Origin, Runtime};
-use hex_literal::hex;
 use primitive_types::H256;
 use rand::{rngs::StdRng, seq::SliceRandom, RngCore, SeedableRng};
+use sp_core::sr25519;
 use sp_std::collections::btree_map::BTreeMap;
 use tests_contract_template::WASM_BINARY_BLOATY as GENERAL_WASM_BINARY;
 use tests_mul_by_const::WASM_BINARY_BLOATY as MUL_CONST_WASM_BINARY;
@@ -35,10 +35,6 @@ use std::fmt;
 
 use crate::util::*;
 use crate::{Params, MAX_QUEUE_LEN};
-
-// pub enum Error {
-//     IncompatibleParams,
-// }
 
 type TargetOutcome = Result<GasUsageStats, DispatchError>;
 
@@ -55,8 +51,6 @@ impl fmt::Debug for Seed {
         fmt::Display::fmt(self, f)
     }
 }
-
-const ALICE: [u8; 32] = hex!["0100000000000000000000000000000000000000000000000000000000000000"];
 
 const MAX_BLOCK: u16 = 20;
 const MIN_BLOCK: u16 = 3;
@@ -82,7 +76,19 @@ impl GasUsageStats {
 }
 
 pub fn composer_target(params: &Params) -> TargetOutcome {
-    let (mut ext, pool) = with_offchain_ext(vec![(ALICE, 1_000_000_000_000_000_u128)]);
+    let alice = get_account_id_from_seed::<sr25519::Public>("Alice");
+    let (mut ext, pool) = with_offchain_ext(
+        vec![
+            (alice.clone(), 1_000_000_000_000_000_u128),
+            (
+                // Just in case, to avoid removing account as dust
+                get_account_id_from_seed::<sr25519::Public>("Val"),
+                1_000_u128,
+            ),
+        ],
+        vec![authority_keys_from_seed("Val")],
+        alice.clone(),
+    );
     ext.execute_with(|| {
         // Initial value in all gas trees is 0
         if <Runtime as pallet_gear::Config>::GasHandler::total_supply() != 0
@@ -105,7 +111,7 @@ pub fn composer_target(params: &Params) -> TargetOutcome {
             );
 
             Gear::submit_program(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 MUL_CONST_WASM_BINARY
                     .expect("Wasm binary missing!")
                     .to_vec(),
@@ -117,7 +123,7 @@ pub fn composer_target(params: &Params) -> TargetOutcome {
             .map_err(|e| e.error)?;
 
             Gear::submit_program(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 NCOMPOSE_WASM_BINARY.expect("Wasm binary missing!").to_vec(),
                 b"salt".to_vec(),
                 (<[u8; 32]>::from(mul_id), params.depth).encode(),
@@ -129,7 +135,7 @@ pub fn composer_target(params: &Params) -> TargetOutcome {
             run_to_block_with_ocw(2, pool.clone(), None);
 
             Gear::send_message(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 composer_id,
                 1_u64.to_le_bytes().to_vec(),
                 params.gas_limit,
@@ -185,13 +191,20 @@ pub fn simple_target(params: &Params) -> TargetOutcome {
         let mut rng: StdRng = SeedableRng::from_seed(params.input);
 
         // Create a distribution of user accounts, mint funds
+        let alice = get_account_id_from_seed::<sr25519::Public>("Alice");
         let initial_accounts_num = 1 + (rng.next_u32() % 1000); // [1..1000]
-        let mut accounts = vec![(ALICE, 1_000_000_000_000_000_u128)];
+        let mut accounts = vec![
+            (alice.clone(), 1_000_000_000_000_000_u128),
+            // (
+            //     get_account_id_from_seed::<sr25519::Public>("Val"),
+            //     1_000_u128,
+            // ),
+        ];
         for _ in 1..initial_accounts_num {
             let mut acc_id = [0_u8; 32];
             rng.fill_bytes(&mut acc_id);
             let balance = (rng.next_u64() >> 14) as u128; // approx. up to 10^15
-            accounts.push((acc_id, balance));
+            accounts.push((acc_id.into(), balance));
         }
         log::debug!(
             "[simple_target] Created balances for {} accounts",
@@ -199,7 +212,11 @@ pub fn simple_target(params: &Params) -> TargetOutcome {
         );
 
         // Creating test externalities (with offchain workers support)
-        let (mut ext, pool) = with_offchain_ext(accounts.clone());
+        let (mut ext, pool) = with_offchain_ext(
+            accounts.clone(),
+            vec![authority_keys_from_seed("Val")],
+            alice.clone(),
+        );
         ext.execute_with(|| {
             // Currency balance of all accounts (total issuance)
             let initial_total_balance =
@@ -295,7 +312,7 @@ pub fn simple_target(params: &Params) -> TargetOutcome {
 
             // Deploy test contracts by sending out init messages on behalf of users
             let payload = (program_ids.clone(), non_program_ids.clone()).encode();
-            let author = accounts
+            let author = &accounts
                 .choose(&mut rng)
                 .expect("Accounts vec must not be empty")
                 .0;
@@ -307,7 +324,7 @@ pub fn simple_target(params: &Params) -> TargetOutcome {
             };
             for (_k, (c, s)) in contracts {
                 Gear::submit_program(
-                    Origin::signed(author.into()),
+                    Origin::signed(author.clone().into()),
                     c,
                     s,
                     payload.clone(),
@@ -368,7 +385,7 @@ pub fn simple_target(params: &Params) -> TargetOutcome {
             // for a block number in [3..N] send out messages and run queue processing
             for (blk, entries) in queue {
                 for (hash_id, seed) in entries {
-                    let author = accounts
+                    let author = &accounts
                         .choose(&mut rng)
                         .expect("Accounts vec must not be empty")
                         .0;
@@ -379,7 +396,7 @@ pub fn simple_target(params: &Params) -> TargetOutcome {
                         _ => 0_u128,
                     };
                     Gear::send_message(
-                        Origin::signed(author.into()),
+                        Origin::signed(author.clone().into()),
                         hashes[hash_id as usize],
                         seed.0.to_vec(),
                         params.gas_limit,
@@ -422,15 +439,25 @@ mod tests {
     #[test]
     fn test_gas_total_supply_is_stable() {
         init_logger();
-        new_test_ext(vec![(ALICE, 1_000_000_000_000_000_u128)]).execute_with(|| {
+        let alice = get_account_id_from_seed::<sr25519::Public>("Alice");
+        new_test_ext(
+            vec![
+                (alice.clone(), 1_000_000_000_000_000_u128),
+                (
+                    get_account_id_from_seed::<sr25519::Public>("Val"),
+                    1_000_u128,
+                ),
+            ],
+            vec![authority_keys_from_seed("Val")],
+            alice.clone(),
+        )
+        .execute_with(|| {
             // Initial value in all gas trees is 0
             assert_eq!(
                 <Runtime as pallet_gear::Config>::GasHandler::total_supply(),
                 0
             );
             assert_eq!(total_gas_in_wait_list(), 0);
-
-            log::debug!("We're in");
 
             let composer_id =
                 generate_program_id(NCOMPOSE_WASM_BINARY.expect("Wasm binary missing!"), b"salt");
@@ -440,7 +467,7 @@ mod tests {
             );
 
             assert_ok!(Gear::submit_program(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 MUL_CONST_WASM_BINARY
                     .expect("Wasm binary missing!")
                     .to_vec(),
@@ -451,7 +478,7 @@ mod tests {
             ));
 
             assert_ok!(Gear::submit_program(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 NCOMPOSE_WASM_BINARY.expect("Wasm binary missing!").to_vec(),
                 b"salt".to_vec(),
                 (<[u8; 32]>::from(mul_id), 8_u16).encode(), // 8 iterations
@@ -462,7 +489,7 @@ mod tests {
             run_to_block(2, None);
 
             assert_ok!(Gear::send_message(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 composer_id,
                 10_u64.to_le_bytes().to_vec(),
                 100_000_000_000,
@@ -487,7 +514,19 @@ mod tests {
     #[test]
     fn test_two_contracts_composition_works() {
         init_logger();
-        new_test_ext(vec![(ALICE, 1_000_000_000_000_000_u128)]).execute_with(|| {
+        let alice = get_account_id_from_seed::<sr25519::Public>("Alice");
+        new_test_ext(
+            vec![
+                (alice.clone(), 1_000_000_000_000_000_u128),
+                (
+                    get_account_id_from_seed::<sr25519::Public>("Val"),
+                    1_000_u128,
+                ),
+            ],
+            vec![authority_keys_from_seed("Val")],
+            alice.clone(),
+        )
+        .execute_with(|| {
             // Initial value in all gas trees is 0
             assert_eq!(
                 <Runtime as pallet_gear::Config>::GasHandler::total_supply(),
@@ -507,7 +546,7 @@ mod tests {
                 generate_program_id(COMPOSE_WASM_BINARY.expect("Wasm binary missing!"), b"salt");
 
             assert_ok!(Gear::submit_program(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 MUL_CONST_WASM_BINARY
                     .expect("Wasm binary missing!")
                     .to_vec(),
@@ -518,7 +557,7 @@ mod tests {
             ));
 
             assert_ok!(Gear::submit_program(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 MUL_CONST_WASM_BINARY
                     .expect("Wasm binary missing!")
                     .to_vec(),
@@ -529,7 +568,7 @@ mod tests {
             ));
 
             assert_ok!(Gear::submit_program(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 COMPOSE_WASM_BINARY.expect("Wasm binary missing!").to_vec(),
                 b"salt".to_vec(),
                 (
@@ -544,7 +583,7 @@ mod tests {
             run_to_block(2, None);
 
             assert_ok!(Gear::send_message(
-                Origin::signed(ALICE.into()),
+                Origin::signed(alice.clone()),
                 compose_id,
                 100_u64.to_le_bytes().to_vec(),
                 100_000_000_000,
@@ -683,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Supposed to fail"]
+    // #[ignore = "Supposed to fail"]
     fn run_target_with_params() {
         let params = crate::SimpleParams {
             num_contracts: 14,

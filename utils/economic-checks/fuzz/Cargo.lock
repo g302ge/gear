@@ -514,10 +514,13 @@ dependencies = [
  "gear-core",
  "gear-runtime",
  "hex",
- "hex-literal",
  "log",
+ "pallet-aura",
  "pallet-balances",
  "pallet-gear",
+ "pallet-grandpa",
+ "pallet-sudo",
+ "pallet-transaction-payment",
  "pallet-usage",
  "parity-scale-codec",
  "parity-wasm 0.42.2",
@@ -526,10 +529,13 @@ dependencies = [
  "rand 0.8.5",
  "scale-info",
  "serde",
+ "sp-consensus-aura",
  "sp-core",
+ "sp-finality-grandpa",
  "sp-io",
  "sp-runtime",
  "sp-std",
+ "tests-compose",
  "tests-contract-template",
  "tests-mul-by-const",
  "tests-ncompose",
@@ -1011,6 +1017,7 @@ dependencies = [
  "frame-system",
  "frame-system-rpc-runtime-api",
  "gear-common",
+ "hex-literal",
  "log",
  "pallet-aura",
  "pallet-authorship",
@@ -1056,6 +1063,7 @@ dependencies = [
  "libc",
  "log",
  "page_size",
+ "parity-scale-codec",
  "sp-runtime-interface",
  "sp-std",
 ]
@@ -1431,9 +1439,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.14"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
+checksum = "6389c490849ff5bc16be905ae24bc913a9c8892e19b2341dbc175e14c341c2b8"
 dependencies = [
  "cfg-if",
 ]
@@ -3286,6 +3294,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dfed899f0eb03f32ee8c6a0aabdb8a7949659e3466561fc0adf54e26d88c5f4"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "tests-compose"
+version = "0.1.0"
+dependencies = [
+ "gstd",
+ "hex",
+ "parity-scale-codec",
+ "substrate-wasm-builder",
 ]
 
 [[package]]

@@ -96,19 +96,13 @@ mod wasm {
                 hex::encode(self.other.handle),
                 exec::gas_available(),
             );
-            let output_other = self
-                .other
-                .call(input, exec::gas_available() - 200_000_000)
-                .await?;
+            let output_other = self.other.call(input).await?;
             debug!(
                 "[0x{} ncompose::compose_with_self] Calling self with gas limit {}",
                 hex::encode(exec::program_id()),
                 exec::gas_available(),
             );
-            let output = self
-                .me
-                .call(output_other, exec::gas_available() - 200_000_000)
-                .await?;
+            let output = self.me.call(output_other).await?;
             debug!(
                 "[0x{} ncompose::compose_with_self] Output: {:?}",
                 hex::encode(exec::program_id()),
@@ -131,7 +125,7 @@ mod wasm {
             }
         }
 
-        async fn call(&self, input: Vec<u8>, _gas_limit: u64) -> Result<Vec<u8>, &'static str> {
+        async fn call(&self, input: Vec<u8>) -> Result<Vec<u8>, &'static str> {
             let reply_bytes = msg::send_bytes_and_wait_for_reply(self.handle, &input[..], 0)
                 .await
                 .map_err(|_| "Error in async message processing")?;
