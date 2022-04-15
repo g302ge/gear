@@ -173,13 +173,13 @@ fn all_keys_are_cleared() {
         Gas::consume(root);
         for key in sub_keys.iter() {
             // here we have not yet consumed everything
-            assert!(ValueView::<Test>::contains_key(*key));
+            assert!(GasTree::<Test>::contains_key(*key));
 
             Gas::consume(*key);
         }
 
         // here we consumed everything
-        let key_count = ValueView::<Test>::iter_keys().fold(0, |k, _| k + 1);
+        let key_count = GasTree::<Test>::iter_keys().fold(0, |k, _| k + 1);
         assert_eq!(key_count, 0);
     });
 }

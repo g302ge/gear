@@ -194,7 +194,7 @@ pub trait DAGBasedLedger {
         amount: Self::Balance,
     ) -> Result<Self::PositiveImbalance, DispatchError>;
 
-    /// Get the external origin for a key, if the latter exists.
+    /// The external origin for a key, if the latter exists, None otherwise.
     fn get_origin(key: Self::Key) -> Option<Self::ExternalOrigin>;
 
     /// Get value item by it's ID, if exists, and the key of an ancestor that sets this limit.
