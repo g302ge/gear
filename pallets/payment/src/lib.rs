@@ -101,28 +101,28 @@ impl<B, C> CustomFees<B, C> for () {
 }
 
 /// A trait whose purpose is to extract the `Call` variant of an extrinsic
-pub trait IntoCall<Call> {
-    fn into_call(&self) -> Call;
+pub trait ExtractCall<Call> {
+    fn extract_call(&self) -> Call;
 }
 
 /// Implementation for unchecked extrinsic.
-impl<Address, Call, Signature, Extra> IntoCall<Call>
+impl<Address, Call, Signature, Extra> ExtractCall<Call>
     for UncheckedExtrinsic<Address, Call, Signature, Extra>
 where
     Call: Dispatchable + Clone,
     Extra: SignedExtension,
 {
-    fn into_call(&self) -> Call {
+    fn extract_call(&self) -> Call {
         self.function.clone()
     }
 }
 
 /// Implementation for checked extrinsic.
-impl<Address, Call, Extra> IntoCall<Call> for CheckedExtrinsic<Address, Call, Extra>
+impl<Address, Call, Extra> ExtractCall<Call> for CheckedExtrinsic<Address, Call, Extra>
 where
     Call: Dispatchable + Clone,
 {
-    fn into_call(&self) -> Call {
+    fn extract_call(&self) -> Call {
         self.function.clone()
     }
 }
@@ -140,7 +140,7 @@ impl<T: Config> Pallet<T> {
     /// - the usual fee that applies to all dispatchables and takes into account extrinsic weight;
     /// - optionally, additional fee that applies to extrinsics that push messages to the queue.
     pub fn query_info<
-        Extrinsic: sp_runtime::traits::Extrinsic + GetDispatchInfo + IntoCall<CallOf<T>>,
+        Extrinsic: sp_runtime::traits::Extrinsic + GetDispatchInfo + ExtractCall<CallOf<T>>,
     >(
         unchecked_extrinsic: Extrinsic,
         len: u32,
@@ -157,7 +157,8 @@ impl<T: Config> Pallet<T> {
 
         let extra_fee = match pays_fee {
             Pays::Yes => {
-                let call = <Extrinsic as IntoCall<CallOf<T>>>::into_call(&unchecked_extrinsic);
+                let call =
+                    <Extrinsic as ExtractCall<CallOf<T>>>::extract_call(&unchecked_extrinsic);
                 T::MessageQueueExtras::apply_custom_fee(&call).unwrap_or_default()
             }
             _ => BalanceOf::<T>::saturated_from(0_u32),
@@ -183,7 +184,7 @@ impl<T: Config> Pallet<T> {
     /// Query the detailed fee of a given `call`.
     /// Combines data about common and optional (extra) fees.
     pub fn query_fee_details<
-        Extrinsic: sp_runtime::traits::Extrinsic + GetDispatchInfo + IntoCall<CallOf<T>>,
+        Extrinsic: sp_runtime::traits::Extrinsic + GetDispatchInfo + ExtractCall<CallOf<T>>,
     >(
         unchecked_extrinsic: Extrinsic,
         len: u32,
@@ -194,7 +195,8 @@ impl<T: Config> Pallet<T> {
             T,
         >>::Balance: FixedPointOperand,
     {
-        let call: CallOf<T> = <Extrinsic as IntoCall<CallOf<T>>>::into_call(&unchecked_extrinsic);
+        let call: CallOf<T> =
+            <Extrinsic as ExtractCall<CallOf<T>>>::extract_call(&unchecked_extrinsic);
         let extra_fee = T::MessageQueueExtras::apply_custom_fee(&call).unwrap_or_default();
 
         let FeeDetails { inclusion_fee, tip } =
@@ -217,7 +219,7 @@ impl<T: Config> Pallet<T> {
             },
         );
         FeeDetails {
-            inclusion_fee: inclusion_fee,
+            inclusion_fee,
             tip: balance!(tip),
         }
     }
@@ -306,7 +308,7 @@ where
             // refund to the the account that paid the fees. If this fails, the
             // account might have dropped below the existential balance. In
             // that case we don't refund anything.
-            let refund_imbalance = T::Currency::deposit_into_existing(&who, refund_amount)
+            let refund_imbalance = T::Currency::deposit_into_existing(who, refund_amount)
                 .unwrap_or_else(|_| PositiveImbalanceOf::<T>::zero());
             // merge the imbalance caused by paying the fees and refunding parts of it again.
             let adjusted_paid = paid
