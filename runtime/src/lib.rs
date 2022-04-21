@@ -27,17 +27,15 @@ include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 use pallet_grandpa::{
     fg_primitives, AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList,
 };
-pub use pallet_transaction_payment::{Multiplier, MultiplierUpdate};
+pub use pallet_transaction_payment::{CurrencyAdapter, Multiplier};
 use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata, H256};
 use sp_runtime::{
     create_runtime_str, generic, impl_opaque_keys,
-    traits::{
-        AccountIdLookup, BlakeTwo256, Block as BlockT, Convert, IdentifyAccount, NumberFor, Verify,
-    },
+    traits::{AccountIdLookup, BlakeTwo256, Block as BlockT, IdentifyAccount, NumberFor, Verify},
     transaction_validity::{TransactionSource, TransactionValidity},
-    ApplyExtrinsicResult, FixedPointNumber, MultiSignature, Perbill, Percent, Perquintill,
+    ApplyExtrinsicResult, FixedPointNumber, MultiSignature, Perbill, Percent,
 };
 use sp_std::convert::{TryFrom, TryInto};
 use sp_std::prelude::*;
@@ -51,8 +49,8 @@ pub use pallet_gear::manager::{ExtManager, HandleKind};
 pub use frame_support::{
     construct_runtime, parameter_types,
     traits::{
-        ConstU128, ConstU32, ConstU64, ConstU8, FindAuthor, KeyOwnerProofSystem, Randomness,
-        StorageInfo,
+        ConstU128, ConstU32, ConstU64, ConstU8, Currency, FindAuthor, KeyOwnerProofSystem,
+        OnUnbalanced, Randomness, StorageInfo,
     },
     weights::{
         constants::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight, WEIGHT_PER_SECOND},
@@ -62,13 +60,13 @@ pub use frame_support::{
 };
 pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
-use pallet_transaction_payment::CurrencyAdapter;
+
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
 
 #[cfg(feature = "debug-mode")]
 pub use pallet_gear_debug;
-pub use {pallet_gas, pallet_gear, pallet_usage};
+pub use {pallet_gas, pallet_gear, pallet_gear_payment, pallet_usage};
 
 /// An index to a block.
 pub type BlockNumber = u32;
@@ -307,41 +305,12 @@ parameter_types! {
     pub MinimumMultiplier: Multiplier = Multiplier::saturating_from_integer(1);
 }
 
-/// Custom fee multiplier which remains constant regardless the network congestion
-/// TODO: consider using Substrate's built-in `pallet_transaction_payment::TargetedFeeAdjustment`
-/// to allow elastic fees based on network conditions (if that's more appropriate)
-pub struct ConstantFeeMultiplier<M>(sp_std::marker::PhantomData<M>);
-
-impl<M> MultiplierUpdate for ConstantFeeMultiplier<M>
-where
-    M: frame_support::traits::Get<Multiplier>,
-{
-    fn min() -> Multiplier {
-        M::get()
-    }
-    fn target() -> Perquintill {
-        Default::default()
-    }
-    fn variability() -> Multiplier {
-        Default::default()
-    }
-}
-impl<M> Convert<Multiplier, Multiplier> for ConstantFeeMultiplier<M>
-where
-    M: frame_support::traits::Get<Multiplier>,
-{
-    fn convert(previous: Multiplier) -> Multiplier {
-        let min_multiplier = M::get();
-        previous.max(min_multiplier)
-    }
-}
-
 impl pallet_transaction_payment::Config for Runtime {
-    type OnChargeTransaction = CurrencyAdapter<Balances, ()>;
+    type OnChargeTransaction = GearPayment;
     type TransactionByteFee = TransactionByteFee;
     type OperationalFeeMultiplier = ConstU8<5>;
     type WeightToFee = IdentityFee<Balance>;
-    type FeeMultiplierUpdate = ConstantFeeMultiplier<MinimumMultiplier>;
+    type FeeMultiplierUpdate = pallet_gear_payment::ConstantFeeMultiplier<MinimumMultiplier>;
 }
 
 impl pallet_sudo::Config for Runtime {
@@ -409,6 +378,45 @@ impl pallet_usage::Config for Runtime {
 
 impl pallet_gas::Config for Runtime {}
 
+pub struct MsgQueueInflationPenalty;
+
+impl pallet_gear_payment::CustomFees<Balance, Call> for MsgQueueInflationPenalty {
+    fn apply_custom_fee(call: &Call) -> Option<Balance> {
+        match call {
+            Call::Gear(pallet_gear::Call::submit_program { .. })
+            | Call::Gear(pallet_gear::Call::send_message { .. })
+            | Call::Gear(pallet_gear::Call::send_reply { .. }) => {
+                Some(GearPayment::message_queue_size_to_fee())
+            }
+            _ => None,
+        }
+    }
+}
+
+type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
+
+pub struct DealWithFees;
+impl OnUnbalanced<NegativeImbalance> for DealWithFees {
+    fn on_unbalanceds<B>(mut fees_then_tips: impl Iterator<Item = NegativeImbalance>) {
+        if let Some(fees) = fees_then_tips.next() {
+            if let Some(author) = Authorship::author() {
+                Balances::resolve_creating(&author, fees);
+            }
+            if let Some(tips) = fees_then_tips.next() {
+                if let Some(author) = Authorship::author() {
+                    Balances::resolve_creating(&author, tips);
+                }
+            }
+        }
+    }
+}
+
+impl pallet_gear_payment::Config for Runtime {
+    type MessageQueueExtras = MsgQueueInflationPenalty;
+    type FeeDepositor = DealWithFees;
+    type Currency = Balances;
+}
+
 impl<C> frame_system::offchain::SendTransactionTypes<C> for Runtime
 where
     Call: From<C>,
@@ -439,6 +447,7 @@ construct_runtime!(
         Gear: pallet_gear,
         Usage: pallet_usage,
         Gas: pallet_gas,
+        GearPayment: pallet_gear_payment,
 
         // Only available with "debug-mode" feature on
         GearDebug: pallet_gear_debug,
@@ -466,6 +475,7 @@ construct_runtime!(
         Gear: pallet_gear,
         Usage: pallet_usage,
         Gas: pallet_gas,
+        GearPayment: pallet_gear_payment,
     }
 );
 
@@ -623,13 +633,13 @@ impl_runtime_apis! {
             uxt: <Block as BlockT>::Extrinsic,
             len: u32,
         ) -> pallet_transaction_payment_rpc_runtime_api::RuntimeDispatchInfo<Balance> {
-            TransactionPayment::query_info(uxt, len)
+            GearPayment::query_info(uxt, len)
         }
         fn query_fee_details(
             uxt: <Block as BlockT>::Extrinsic,
             len: u32,
         ) -> pallet_transaction_payment::FeeDetails<Balance> {
-            TransactionPayment::query_fee_details(uxt, len)
+            GearPayment::query_fee_details(uxt, len)
         }
     }
 

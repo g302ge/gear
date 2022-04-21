@@ -2250,6 +2250,7 @@ dependencies = [
  "pallet-gas",
  "pallet-gear",
  "pallet-gear-debug",
+ "pallet-gear-payment",
  "pallet-gear-program",
  "pallet-gear-rpc-runtime-api",
  "pallet-grandpa",
@@ -4676,6 +4677,34 @@ dependencies = [
  "scale-info",
  "serde",
  "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std",
+ "wabt",
+]
+
+[[package]]
+name = "pallet-gear-payment"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "gear-common",
+ "log",
+ "pallet-authorship",
+ "pallet-balances",
+ "pallet-gas",
+ "pallet-gear",
+ "pallet-gear-program",
+ "pallet-timestamp",
+ "pallet-transaction-payment",
+ "parity-scale-codec",
+ "parity-wasm 0.42.2",
+ "primitive-types",
+ "scale-info",
+ "serde",
  "sp-io",
  "sp-runtime",
  "sp-std",
