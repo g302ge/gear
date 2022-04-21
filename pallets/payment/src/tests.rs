@@ -22,7 +22,7 @@ use crate::mock::*;
 // use primitive_types::H256;
 
 #[test]
-fn simple_value_tree() {
+fn custom_fees_work() {
     new_test_ext().execute_with(|| {
         assert!(true);
     });
