@@ -33,7 +33,7 @@ use gear_core::{
     program::Program as CoreProgram,
 };
 
-use gear_common::{DAGBasedLedger, Origin as _};
+use gear_common::{Origin as _, ValueTree};
 use gear_test::sample::ChainProgram;
 use gear_test::{
     check::read_test_from_file,

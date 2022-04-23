@@ -21,7 +21,7 @@ use crate::{
     MessageInfo, Pallet,
 };
 use codec::{Decode, Encode};
-use common::{DAGBasedLedger, GasPrice, Origin, Program};
+use common::{GasPrice, Origin, Program, ValueTree};
 use core_processor::common::{
     DispatchOutcome as CoreDispatchOutcome, ExecutableActor, JournalHandler,
 };
@@ -234,22 +234,31 @@ where
 
         match T::GasHandler::spend(message_id, amount) {
             Ok(_) => {
-                if let Some(origin) = T::GasHandler::get_origin(message_id) {
-                    let charge = T::GasPrice::gas_price(amount);
-                    if let Some(author) = Authorship::<T>::author() {
-                        let _ = <T as Config>::Currency::repatriate_reserved(
-                            &<T::AccountId as Origin>::from_origin(origin),
-                            &author,
-                            charge,
-                            BalanceStatus::Free,
-                        );
+                match T::GasHandler::get_origin(message_id) {
+                    Ok(maybe_origin) => {
+                        if let Some(origin) = maybe_origin {
+                            let charge = T::GasPrice::gas_price(amount);
+                            if let Some(author) = Authorship::<T>::author() {
+                                let _ = <T as Config>::Currency::repatriate_reserved(
+                                    &<T::AccountId as Origin>::from_origin(origin),
+                                    &author,
+                                    charge,
+                                    BalanceStatus::Free,
+                                );
+                            }
+                        } else {
+                            log::debug!(
+                                target: "essential",
+                                "Failed to get limit of {:?}",
+                                message_id,
+                            );
+                        }
                     }
-                } else {
-                    log::debug!(
-                        target: "essential",
-                        "Failed to get limit of {:?}",
-                        message_id,
-                    );
+                    Err(_err) => {
+                        // We only can get an error here if the gas tree is invalidated
+                        // TODO: handle appropriately
+                        unreachable!("Can never happen unless gas tree corrupted");
+                    }
                 }
             }
             Err(err) => {
@@ -289,16 +298,25 @@ where
     fn message_consumed(&mut self, message_id: MessageId) {
         let message_id = message_id.into_origin();
 
-        if let Some((neg_imbalance, external)) = T::GasHandler::consume(message_id) {
-            let gas_left = neg_imbalance.peek();
-            log::debug!("Unreserve balance on message processed: {}", gas_left);
+        match T::GasHandler::consume(message_id) {
+            Err(_e) => {
+                // We only can get an error here if the gas tree is invalidated
+                // TODO: handle appropriately
+                unreachable!("Can never happen unless gas tree corrupted");
+            }
+            Ok(maybe_outcome) => {
+                if let Some((neg_imbalance, external)) = maybe_outcome {
+                    let gas_left = neg_imbalance.peek();
+                    log::debug!("Unreserve balance on message processed: {}", gas_left);
 
-            let refund = T::GasPrice::gas_price(gas_left);
+                    let refund = T::GasPrice::gas_price(gas_left);
 
-            let _ = <T as Config>::Currency::unreserve(
-                &<T::AccountId as Origin>::from_origin(external),
-                refund,
-            );
+                    let _ = <T as Config>::Currency::unreserve(
+                        &<T::AccountId as Origin>::from_origin(external),
+                        refund,
+                    );
+                }
+            }
         }
     }
 
@@ -384,22 +402,31 @@ where
 
             match T::GasHandler::spend(message_id.into_origin(), chargeable_amount) {
                 Ok(_) => {
-                    if let Some(origin) = T::GasHandler::get_origin(message_id.into_origin()) {
-                        let charge = T::GasPrice::gas_price(chargeable_amount);
-                        if let Some(author) = Authorship::<T>::author() {
-                            let _ = <T as Config>::Currency::repatriate_reserved(
-                                &<T::AccountId as Origin>::from_origin(origin),
-                                &author,
-                                charge,
-                                BalanceStatus::Free,
-                            );
+                    match T::GasHandler::get_origin(message_id.into_origin()) {
+                        Ok(maybe_origin) => {
+                            if let Some(origin) = maybe_origin {
+                                let charge = T::GasPrice::gas_price(chargeable_amount);
+                                if let Some(author) = Authorship::<T>::author() {
+                                    let _ = <T as Config>::Currency::repatriate_reserved(
+                                        &<T::AccountId as Origin>::from_origin(origin),
+                                        &author,
+                                        charge,
+                                        BalanceStatus::Free,
+                                    );
+                                }
+                            } else {
+                                log::debug!(
+                                    target: "essential",
+                                    "Failed to get limit of {:?}",
+                                    message_id,
+                                );
+                            }
                         }
-                    } else {
-                        log::debug!(
-                            target: "essential",
-                            "Failed to get limit of {:?}",
-                            message_id,
-                        );
+                        Err(_err) => {
+                            // We only can get an error here if the gas tree is invalidated
+                            // TODO: handle appropriately
+                            unreachable!("Can never happen unless gas tree corrupted");
+                        }
                     }
                 }
                 Err(err) => {
