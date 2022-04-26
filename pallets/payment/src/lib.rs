@@ -164,7 +164,7 @@ impl<T: Config> Pallet<T> {
                 let call =
                     <Extrinsic as ExtractCall<CallOf<T>>>::extract_call(&unchecked_extrinsic);
                 T::MessageQueueExtras::apply_custom_fee(&call)
-                    .unwrap_or(CustomFeeMultiplier::saturating_from_integer(1))
+                    .unwrap_or_else(|| CustomFeeMultiplier::saturating_from_integer(1))
             }
             _ => CustomFeeMultiplier::saturating_from_integer(1),
         };
@@ -203,7 +203,7 @@ impl<T: Config> Pallet<T> {
         let call: CallOf<T> =
             <Extrinsic as ExtractCall<CallOf<T>>>::extract_call(&unchecked_extrinsic);
         let extra_fee_multiplier = T::MessageQueueExtras::apply_custom_fee(&call)
-            .unwrap_or(CustomFeeMultiplier::saturating_from_integer(1));
+            .unwrap_or_else(|| CustomFeeMultiplier::saturating_from_integer(1));
 
         let FeeDetails { inclusion_fee, tip } =
             TransactionPayment::<T>::query_fee_details(unchecked_extrinsic, len);

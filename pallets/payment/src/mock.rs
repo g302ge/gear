@@ -167,6 +167,97 @@ impl pallet_gear::WeightInfo for MockWeightInfo {
     fn alloc_in_handle(_q: u32) -> Weight {
         0_u64
     }
+    fn reinstrument(_c: u32) -> Weight {
+        0_u64
+    }
+    fn alloc(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gas(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_gas_available(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_msg_id(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_origin(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_program_id(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_source(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_value(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_value_available(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_size(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_read(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_read_per_kb(_n: u32) -> Weight {
+        0_u64
+    }
+    fn gr_block_height(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_block_timestamp(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_send_init(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_send_push(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_send_push_per_kb(_n: u32) -> Weight {
+        0_u64
+    }
+    fn gr_send_commit(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_send_commit_per_kb(_n: u32) -> Weight {
+        0_u64
+    }
+    fn gr_reply(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_reply_per_kb(_n: u32) -> Weight {
+        0_u64
+    }
+    fn gr_reply_to(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_debug(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_exit_code(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_exit(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_leave(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_wait(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_wake(_r: u32) -> Weight {
+        0_u64
+    }
+    fn gr_create_program_wgas(_r: u32) -> Weight {
+        0_u64
+    }
+
     fn instr_i64const(_r: u32) -> Weight {
         0_u64
     }
@@ -219,9 +310,6 @@ impl pallet_gear::WeightInfo for MockWeightInfo {
         0_u64
     }
     fn instr_memory_current(_r: u32) -> Weight {
-        0_u64
-    }
-    fn instr_memory_grow(_r: u32) -> Weight {
         0_u64
     }
     fn instr_i64clz(_r: u32) -> Weight {
@@ -329,6 +417,7 @@ impl common::GasPrice for GasConverter {
 
 parameter_types! {
     pub const BlockGasLimit: u64 = 500_000_000;
+    pub const OutgoingLimit: u32 = 1024;
     pub const WaitListFeePerBlock: u64 = 1_000;
     pub MySchedule: pallet_gear::Schedule<Test> = <pallet_gear::Schedule<Test>>::default();
 }
@@ -341,6 +430,7 @@ impl pallet_gear::Config for Test {
     type WeightInfo = MockWeightInfo;
     type Schedule = MySchedule;
     type BlockGasLimit = BlockGasLimit;
+    type OutgoingLimit = OutgoingLimit;
     type DebugInfo = ();
     type WaitListFeePerBlock = WaitListFeePerBlock;
 }
