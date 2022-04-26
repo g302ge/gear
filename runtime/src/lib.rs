@@ -380,8 +380,10 @@ impl pallet_gas::Config for Runtime {}
 
 pub struct MsgQueueInflationPenalty;
 
-impl pallet_gear_payment::CustomFees<Balance, Call> for MsgQueueInflationPenalty {
-    fn apply_custom_fee(call: &Call) -> Option<Balance> {
+impl pallet_gear_payment::CustomFees<pallet_gear_payment::CustomFeeMultiplier, Call>
+    for MsgQueueInflationPenalty
+{
+    fn apply_custom_fee(call: &Call) -> Option<pallet_gear_payment::CustomFeeMultiplier> {
         match call {
             Call::Gear(pallet_gear::Call::submit_program { .. })
             | Call::Gear(pallet_gear::Call::send_message { .. })

@@ -525,6 +525,11 @@ pub fn dispatch_iter() -> Iterator<StoredDispatch> {
     StorageQueue::get(STORAGE_MESSAGE_PREFIX).into_iter()
 }
 
+pub fn dispatch_queue_len() -> u64 {
+    let dispatch_queue = StorageQueue::<StoredDispatch>::get(STORAGE_MESSAGE_PREFIX);
+    dispatch_queue.len()
+}
+
 pub fn set_program_persistent_pages(id: H256, persistent_pages: BTreeSet<PageNumber>) {
     if let Some(Program::Active(mut prog)) = get_program(id) {
         prog.persistent_pages = persistent_pages;

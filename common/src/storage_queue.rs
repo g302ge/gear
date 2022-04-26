@@ -38,6 +38,7 @@ pub struct StorageQueue<T: Codec> {
     prefix: Cow<'static, [u8]>,
     head: Option<H256>,
     tail: Option<H256>,
+    len: u64,
     _marker: PhantomData<T>,
 }
 
@@ -47,6 +48,11 @@ impl<T: Codec> StorageQueue<T> {
 
         let head_key = [prefix.as_ref(), b"head"].concat();
         let tail_key = [prefix.as_ref(), b"tail"].concat();
+        let len_key = [prefix.as_ref(), b"len"].concat();
+
+        let len = sp_io::storage::get(&len_key)
+            .map(|bytes| u64::decode(&mut &bytes[..]).expect("Decoding previously encoded value"))
+            .unwrap_or_default();
 
         if let Some(head) = sp_io::storage::get(&head_key) {
             let head = H256::from_slice(&head);
@@ -56,6 +62,7 @@ impl<T: Codec> StorageQueue<T> {
                     prefix,
                     head: Some(head),
                     tail: Some(tail),
+                    len,
                     _marker: Default::default(),
                 }
             } else {
@@ -63,6 +70,7 @@ impl<T: Codec> StorageQueue<T> {
                     prefix,
                     head: Some(head),
                     tail: Some(head),
+                    len,
                     _marker: Default::default(),
                 }
             }
@@ -71,6 +79,7 @@ impl<T: Codec> StorageQueue<T> {
                 prefix,
                 head: None,
                 tail: None,
+                len: 0,
                 _marker: Default::default(),
             }
         }
@@ -105,6 +114,9 @@ impl<T: Codec> StorageQueue<T> {
 
         // update tail
         self.set_tail(id);
+
+        // update queue length
+        self.inc_len();
     }
 
     pub fn dequeue(&mut self) -> Option<T> {
@@ -122,6 +134,7 @@ impl<T: Codec> StorageQueue<T> {
                     self.head = None;
                     self.tail = None;
                 }
+                self.dec_len();
                 Some(node.value)
             } else {
                 None
@@ -145,7 +158,8 @@ impl<T: Codec> StorageQueue<T> {
                 .encode(),
             );
 
-            self.set_head(id)
+            self.set_head(id);
+            self.inc_len();
         }
     }
 
@@ -161,6 +175,22 @@ impl<T: Codec> StorageQueue<T> {
     fn set_tail(&mut self, id: H256) {
         self.tail = Some(id);
         sp_io::storage::set(&self.key_with_prefix(b"tail"), &id.to_fixed_bytes());
+    }
+
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    fn inc_len(&mut self) {
+        let new_len = self.len.saturating_add(1);
+        self.len = new_len;
+        sp_io::storage::set(&self.key_with_prefix(b"len"), &new_len.encode());
+    }
+
+    fn dec_len(&mut self) {
+        let new_len = self.len.saturating_sub(1);
+        self.len = new_len;
+        sp_io::storage::set(&self.key_with_prefix(b"len"), &new_len.encode());
     }
 
     fn key_with_prefix(&self, key: &[u8]) -> Vec<u8> {
@@ -217,6 +247,9 @@ mod tests {
 
             let value: Option<u8> = queue.dequeue();
             assert!(value.is_none());
+
+            // Queue length remains 0
+            assert_eq!(queue.len, 0);
         });
     }
 
@@ -226,9 +259,12 @@ mod tests {
             let mut queue = StorageQueue::get(b"test::queue::".as_ref());
 
             queue.queue(0u32, H256::random());
+            assert_eq!(queue.len, 1);
+
             let value: Option<u32> = queue.dequeue();
 
             assert_eq!(value, Some(0u32));
+            assert_eq!(queue.len, 0);
         });
     }
 
@@ -238,9 +274,12 @@ mod tests {
             let mut queue = StorageQueue::get(b"test::queue::".as_ref());
 
             queue.queue_first(0u32, H256::random());
+            assert_eq!(queue.len, 1);
+
             let value: Option<u32> = queue.dequeue();
 
             assert_eq!(value, Some(0u32));
+            assert_eq!(queue.len, 0);
         });
     }
 
@@ -252,14 +291,19 @@ mod tests {
             queue.queue(0u32, H256::random());
             queue.queue_first(1u32, H256::random());
 
+            assert_eq!(queue.len, 2);
+
             let value: Option<u32> = queue.dequeue();
             assert_eq!(value, Some(1u32));
+            assert_eq!(queue.len, 1);
 
             let value: Option<u32> = queue.dequeue();
             assert_eq!(value, Some(0u32));
+            assert_eq!(queue.len, 0);
 
             let value: Option<u32> = queue.dequeue();
             assert!(value.is_none());
+            assert_eq!(queue.len, 0);
         });
     }
 
@@ -269,14 +313,17 @@ mod tests {
             let mut queue = StorageQueue::get(b"test::queue::".as_ref());
 
             (0..10u32).for_each(|x| queue.queue(x, H256::random()));
+            assert_eq!(queue.len, 10);
 
             (0..10u32).for_each(|x| {
                 let value: Option<u32> = queue.dequeue();
                 assert_eq!(Some(x), value);
             });
+            assert_eq!(queue.len, 0);
 
             let value: Option<u32> = queue.dequeue();
             assert!(value.is_none());
+            assert_eq!(queue.len, 0);
         });
     }
 }

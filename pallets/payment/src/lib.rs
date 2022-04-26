@@ -35,7 +35,7 @@ use sp_runtime::{
         Convert, DispatchInfoOf, Dispatchable, PostDispatchInfoOf, SaturatedConversion, Saturating,
         SignedExtension, Zero,
     },
-    FixedPointNumber, FixedPointOperand, Perquintill,
+    FixedPointNumber, FixedPointOperand, FixedU128, Perquintill,
 };
 
 pub use pallet::*;
@@ -53,6 +53,8 @@ type PositiveImbalanceOf<T> = <<T as Config>::Currency as Currency<
 type CallOf<T> = <T as frame_system::Config>::Call;
 
 pub type TransactionPayment<T> = pallet_transaction_payment::Pallet<T>;
+
+pub(crate) const CUSTOM_FEE_STEP: u64 = 5;
 
 #[cfg(test)]
 mod mock;
@@ -90,15 +92,17 @@ where
 }
 
 /// A trait to be able to customize fees for certain extrinsics types
-pub trait CustomFees<Balance, Call> {
-    fn apply_custom_fee(call: &Call) -> Option<Balance>;
+pub trait CustomFees<Output, Call> {
+    fn apply_custom_fee(call: &Call) -> Option<Output>;
 }
 
-impl<B, C> CustomFees<B, C> for () {
-    fn apply_custom_fee(_call: &C) -> Option<B> {
+impl<O, C> CustomFees<O, C> for () {
+    fn apply_custom_fee(_call: &C) -> Option<O> {
         None
     }
 }
+
+pub type CustomFeeMultiplier = FixedU128;
 
 /// A trait whose purpose is to extract the `Call` variant of an extrinsic
 pub trait ExtractCall<Call> {
@@ -155,13 +159,14 @@ impl<T: Config> Pallet<T> {
         let DispatchInfo { pays_fee, .. } =
             <Extrinsic as GetDispatchInfo>::get_dispatch_info(&unchecked_extrinsic);
 
-        let extra_fee = match pays_fee {
+        let extra_fee_multiplier = match pays_fee {
             Pays::Yes => {
                 let call =
                     <Extrinsic as ExtractCall<CallOf<T>>>::extract_call(&unchecked_extrinsic);
-                T::MessageQueueExtras::apply_custom_fee(&call).unwrap_or_default()
+                T::MessageQueueExtras::apply_custom_fee(&call)
+                    .unwrap_or(CustomFeeMultiplier::saturating_from_integer(1))
             }
-            _ => BalanceOf::<T>::saturated_from(0_u32),
+            _ => CustomFeeMultiplier::saturating_from_integer(1),
         };
 
         // Common fee part
@@ -171,13 +176,13 @@ impl<T: Config> Pallet<T> {
             partial_fee,
         } = TransactionPayment::<T>::query_info(unchecked_extrinsic, len);
 
-        // Combine (converting fees values trouhg u128)
-        let combined_fee = balance!(partial_fee).saturating_add(extra_fee);
+        // Combine fees
+        let combined_fee = extra_fee_multiplier.saturating_mul_int(partial_fee);
 
         RuntimeDispatchInfo {
             weight,
             class,
-            partial_fee: combined_fee,
+            partial_fee: balance!(combined_fee),
         }
     }
 
@@ -197,7 +202,8 @@ impl<T: Config> Pallet<T> {
     {
         let call: CallOf<T> =
             <Extrinsic as ExtractCall<CallOf<T>>>::extract_call(&unchecked_extrinsic);
-        let extra_fee = T::MessageQueueExtras::apply_custom_fee(&call).unwrap_or_default();
+        let extra_fee_multiplier = T::MessageQueueExtras::apply_custom_fee(&call)
+            .unwrap_or(CustomFeeMultiplier::saturating_from_integer(1));
 
         let FeeDetails { inclusion_fee, tip } =
             TransactionPayment::<T>::query_fee_details(unchecked_extrinsic, len);
@@ -210,11 +216,11 @@ impl<T: Config> Pallet<T> {
              }| {
                 // Combine the `adjusted_weight_fee` with `extra_fee`
                 let combined_adjusted_weight_fee =
-                    balance!(adjusted_weight_fee).saturating_add(extra_fee);
+                    extra_fee_multiplier.saturating_mul_int(adjusted_weight_fee);
                 InclusionFee {
                     base_fee: balance!(base_fee),
                     len_fee: balance!(len_fee),
-                    adjusted_weight_fee: combined_adjusted_weight_fee,
+                    adjusted_weight_fee: balance!(combined_adjusted_weight_fee),
                 }
             },
         );
@@ -225,21 +231,20 @@ impl<T: Config> Pallet<T> {
     }
 
     // Calculate extra fee based on Message Queue state
-    pub fn message_queue_size_to_fee() -> BalanceOf<T> {
-        // TODO: implement proper algorithm, constant for testing purpose
-        BalanceOf::<T>::saturated_from(300_000_000_u128)
+    pub fn message_queue_size_to_fee() -> CustomFeeMultiplier {
+        <Pallet<T> as Store>::FeeMultiplier::get()
     }
 }
 
 pub struct LiquidityInfo<T: Config> {
-    extra_fee: BalanceOf<T>,
+    extra_fee_multiplier: CustomFeeMultiplier,
     imbalance: Option<NegativeImbalanceOf<T>>,
 }
 
 impl<T: Config> Default for LiquidityInfo<T> {
     fn default() -> Self {
         LiquidityInfo {
-            extra_fee: Default::default(),
+            extra_fee_multiplier: CustomFeeMultiplier::saturating_from_integer(1),
             imbalance: None,
         }
     }
@@ -248,6 +253,7 @@ impl<T: Config> Default for LiquidityInfo<T> {
 impl<T: Config> OnChargeTransaction<T> for Pallet<T>
 where
     DispatchInfoOf<CallOf<T>>: Into<DispatchInfo> + Clone,
+    BalanceOf<T>: FixedPointOperand,
 {
     type Balance = BalanceOf<T>;
     type LiquidityInfo = LiquidityInfo<T>;
@@ -263,8 +269,9 @@ where
             return Ok(Default::default());
         }
 
-        let extra_fee = T::MessageQueueExtras::apply_custom_fee(call).unwrap_or_default();
-        let combined_fee = fee.saturating_add(extra_fee);
+        let extra_fee_multiplier =
+            T::MessageQueueExtras::apply_custom_fee(call).unwrap_or_default();
+        let combined_fee = extra_fee_multiplier.saturating_mul_int(fee);
 
         let withdraw_reason = if tip.is_zero() {
             WithdrawReasons::TRANSACTION_PAYMENT
@@ -279,7 +286,7 @@ where
             ExistenceRequirement::AllowDeath,
         ) {
             Ok(imbalance) => Ok(LiquidityInfo {
-                extra_fee,
+                extra_fee_multiplier,
                 imbalance: Some(imbalance),
             }),
             Err(_) => Err(InvalidTransaction::Payment.into()),
@@ -295,15 +302,14 @@ where
         already_withdrawn: Self::LiquidityInfo,
     ) -> Result<(), TransactionValidityError> {
         let LiquidityInfo {
-            extra_fee,
+            extra_fee_multiplier,
             imbalance,
         } = already_withdrawn;
         if let Some(paid) = imbalance {
-            // Calculate the amont to refund: `refund` = `paid` - (`corrected_fee` + `extra_fee`)
+            // Calculate the amont to refund: `refund` = `paid` - `corrected_fee` * `extra_fee_multiplier`
             let refund_amount = paid
                 .peek()
-                .saturating_sub(corrected_fee)
-                .saturating_sub(extra_fee);
+                .saturating_sub(extra_fee_multiplier.saturating_mul_int(corrected_fee));
 
             // refund to the the account that paid the fees. If this fails, the
             // account might have dropped below the existential balance. In
@@ -333,7 +339,7 @@ pub mod pallet {
         frame_system::Config + pallet_transaction_payment::Config + pallet_authorship::Config
     {
         /// Additional fees to be applied based on the state of the Message Queue
-        type MessageQueueExtras: CustomFees<BalanceOf<Self>, CallOf<Self>>;
+        type MessageQueueExtras: CustomFees<CustomFeeMultiplier, CallOf<Self>>;
 
         /// Type used to actually deposit collected fees
         type FeeDepositor: OnUnbalanced<
@@ -349,14 +355,14 @@ pub mod pallet {
     pub struct Pallet<T>(_);
 
     #[pallet::type_value]
-    pub fn FeeMultiplierOnEmpty() -> Multiplier {
-        Multiplier::saturating_from_integer(1)
+    pub fn FeeMultiplierOnEmpty() -> CustomFeeMultiplier {
+        CustomFeeMultiplier::saturating_from_integer(1)
     }
 
     #[pallet::storage]
     #[pallet::getter(fn fee_multiplier)]
     pub type FeeMultiplier<T: Config> =
-        StorageValue<_, Multiplier, ValueQuery, FeeMultiplierOnEmpty>;
+        StorageValue<_, CustomFeeMultiplier, ValueQuery, FeeMultiplierOnEmpty>;
 
     #[pallet::hooks]
     impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
@@ -367,9 +373,11 @@ pub mod pallet {
 
         /// Finalization
         fn on_finalize(_bn: BlockNumberFor<T>) {
-            // Update multiplier
+            // Get the message queue length
+            let exponent: u64 = common::dispatch_queue_len() / CUSTOM_FEE_STEP;
+            // Update multiplier in storage
             <FeeMultiplier<T>>::mutate(|fm| {
-                *fm = Multiplier::saturating_from_integer(10); // TODO: implement proper algorithm
+                *fm = CustomFeeMultiplier::saturating_from_integer(1 << exponent);
             });
         }
     }

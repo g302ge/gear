@@ -27,7 +27,7 @@ use primitive_types::H256;
 use sp_runtime::{
     testing::Header,
     traits::{BlakeTwo256, IdentityLookup},
-    FixedPointNumber,
+    FixedPointNumber, FixedU128,
 };
 use sp_std::convert::{TryFrom, TryInto};
 
@@ -37,6 +37,8 @@ type Block = frame_system::mocking::MockBlock<Test>;
 pub const ALICE: u64 = 1;
 pub const BOB: u64 = 2;
 pub const BLOCK_AUTHOR: u64 = 255;
+
+pub type CustomFeeMultiplier = FixedU128;
 
 // Configure a mock runtime to test the pallet.
 construct_runtime!(
@@ -353,8 +355,8 @@ impl pallet_gas::Config for Test {}
 
 pub struct MsgQueueInflationPenalty;
 
-impl pallet_gear_payment::CustomFees<u128, Call> for MsgQueueInflationPenalty {
-    fn apply_custom_fee(call: &Call) -> Option<u128> {
+impl pallet_gear_payment::CustomFees<CustomFeeMultiplier, Call> for MsgQueueInflationPenalty {
+    fn apply_custom_fee(call: &Call) -> Option<CustomFeeMultiplier> {
         match call {
             Call::Gear(pallet_gear::Call::submit_program { .. })
             | Call::Gear(pallet_gear::Call::send_message { .. })

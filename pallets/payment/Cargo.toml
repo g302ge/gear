@@ -19,6 +19,9 @@ log = { version = "0.4.16", default-features = false }
 parity-wasm = { version = "0.42.2", default-features = false, optional = true }
 primitive-types = { version = "0.11.1", default-features = false, features = ["scale-info"] }
 
+# Internal dependencies
+common = { package = "gear-common", path = "../../common", default-features = false }
+
 # Substrate deps
 frame-support = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-stable", default-features = false }
 frame-system = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-stable", default-features = false }
