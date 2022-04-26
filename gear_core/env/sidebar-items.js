@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["PageAction","Page access rights."]],"struct":[["ClonedExtCarrier","[`ExtCarrier`]’s clone."],["ExtCarrier","Struct for interacting with Ext."]],"trait":[["Ext","External api for managing memory, messages, allocations and gas-counting."]]});
