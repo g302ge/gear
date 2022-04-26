@@ -315,7 +315,6 @@ fn run_fixture(test: &'_ sample::Test, fixture: &sample::Fixture) -> ColoredStri
     }
 
     for exp in &fixture.expected {
-        log::debug!("exp step = {:?}", exp.step);
         let snapshot: DebugData = if let Some(step) = exp.step {
             if snapshots.len() < (step + test.programs.len()) {
                 Default::default()
@@ -336,6 +335,7 @@ fn run_fixture(test: &'_ sample::Test, fixture: &sample::Fixture) -> ColoredStri
             if expected_messages.is_empty() {
                 break;
             }
+
             message_queue.iter_mut().for_each(|(msg, _gas)| {
                 if let Some(id) = programs.get(&msg.destination()) {
                     *msg = StoredMessage::new(
@@ -368,81 +368,16 @@ fn run_fixture(test: &'_ sample::Test, fixture: &sample::Fixture) -> ColoredStri
                         .map(|err| format!("Messages check [{}]", err)),
                 );
             }
-            let mut progs: Vec<gear_core::program::Program> = snapshot
-                .programs
-                .iter()
-                .filter_map(|p| {
-                    if let ProgramState::Active(info) = &p.state {
-                        if let Some((pid, _)) = programs.iter().find(|(_, v)| v == &&p.id) {
-                            let code = <Runtime as pallet_gear::Config>::CodeStorage::get_code(
-                                CodeId::from_origin(info.code_hash),
-                            )
-                            .expect("code should be in the storage");
-                            Some(CoreProgram::from_parts(
-                                *pid,
-                                code,
-                                info.persistent_pages.keys().cloned().collect(),
-                                true,
-                            ))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if let Some(expected_memory) = &exp.memory {
-                if let Err(mem_errors) = gear_test::check::check_memory(&mut progs, expected_memory)
-                {
-                    errors.push(format!("step: {:?}", exp.step));
-                    errors.extend(mem_errors);
-                }
-            }
         }
-        message_queue.iter_mut().for_each(|(msg, _gas)| {
-            if let Some(id) = programs.get(&msg.destination()) {
-                *msg = StoredMessage::new(
-                    msg.id(),
-                    msg.source(),
-                    ProgramId::from(id.as_bytes()),
-                    msg.payload().to_vec(),
-                    msg.value(),
-                    msg.reply(),
-                );
-            }
-        });
 
-        expected_messages.iter_mut().for_each(|msg| {
-            msg.destination =
-                gear_test::address::Address::H256(programs[&msg.destination.to_program_id()])
-        });
-
-        // For runtime tests gas check skipped due to absence of gas tree in snapshot.
-        if let Err(msg_errors) = gear_test::check::check_messages(
-            &progs_n_paths,
-            &message_queue,
-            &expected_messages,
-            true,
-        ) {
-            errors.push(format!("step: {:?}", exp.step));
-            errors.extend(
-                msg_errors
-                    .into_iter()
-                    .map(|err| format!("Messages check [{}]", err)),
-            );
-        }
-        log::debug!(
-            "programs = {:?}",
-            snapshot.programs.iter().map(|p| p.id).collect::<Vec<_>>()
-        );
         let actors: Vec<ExecutableActor> = snapshot
             .programs
             .iter()
             .filter_map(|p| {
                 if let ProgramState::Active(info) = &p.state {
                     if let Some((pid, _)) = programs.iter().find(|(_, v)| v == &&p.id) {
-                        let code = gear_common::get_code(info.code_hash)
+                        let code_id = CodeId::from_origin(info.code_hash);
+                        let code = <Runtime as pallet_gear::Config>::CodeStorage::get_code(code_id)
                             .expect("code should be in the storage");
                         let pages = info
                             .persistent_pages
@@ -464,6 +399,7 @@ fn run_fixture(test: &'_ sample::Test, fixture: &sample::Fixture) -> ColoredStri
                 }
             })
             .collect();
+
         if let Some(expected_memory) = &exp.memory {
             if let Err(mem_errors) = gear_test::check::check_memory(&actors, expected_memory) {
                 errors.push(format!("step: {:?}", exp.step));
