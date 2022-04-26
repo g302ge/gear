@@ -42,19 +42,9 @@ pub use crate::{
 };
 pub use weights::WeightInfo;
 
-use common::{
-    self, CodeMetadata, CodeStorage, DAGBasedLedger, GasPrice, Origin, Program, ProgramState,
-};
-use core_processor::{
-    common::{DispatchOutcome as CoreDispatchOutcome, ExecutableActor, JournalNote},
-    configs::BlockInfo,
-};
+use common::{self, CodeStorage};
 
-use alloc::format;
-use frame_support::{
-    dispatch::{DispatchError, DispatchResultWithPostInfo},
-    traits::{BalanceStatus, Currency, Get, LockableCurrency, ReservableCurrency},
-};
+use frame_support::traits::Currency;
 
 use gear_backend_sandbox::SandboxEnvironment;
 use gear_core::{
@@ -515,14 +505,12 @@ pub mod pallet {
 
                     let code_and_id = CodeAndId::new(code);
                     let code_id = code_and_id.code_id();
-                    let static_pages = code_and_id.code().static_pages();
 
                     let _ = Self::set_code_with_metadata(code_and_id, source);
 
                     ExtManager::<T>::default().set_program(
                         program_id,
                         code_id,
-                        static_pages,
                         root_message_id,
                     );
 
@@ -1107,7 +1095,6 @@ pub mod pallet {
             let origin = who.into_origin();
 
             let code_id = code_and_id.code_id();
-            let static_pages = code_and_id.code().static_pages();
 
             // By that call we follow the guarantee that we have in `Self::submit_code` -
             // if there's code in storage, there's also metadata for it.
@@ -1117,7 +1104,7 @@ pub mod pallet {
 
             let message_id = Self::next_message_id(origin).into_origin();
 
-            ExtManager::<T>::default().set_program(program_id, code_id, static_pages, message_id);
+            ExtManager::<T>::default().set_program(program_id, code_id, message_id);
 
             let _ =
                 T::GasHandler::create(origin, message_id, packet.gas_limit().expect("Can't fail"));

@@ -53,13 +53,13 @@ impl Program {
     pub fn from_parts(
         id: ProgramId,
         code: InstrumentedCode,
-        persistent_pages_numbers: BTreeSet<WasmPageNumber>,
+        allocations: BTreeSet<WasmPageNumber>,
         is_initialized: bool,
     ) -> Self {
         Self {
             id,
             code,
-            allocations: persistent_pages_numbers,
+            allocations,
             is_initialized,
         }
     }
@@ -163,8 +163,7 @@ mod tests {
     use super::Program;
     use crate::code::Code;
     use crate::ids::ProgramId;
-    use crate::memory::PageNumber;
-    use alloc::{vec, vec::Vec};
+    use alloc::vec::Vec;
     use wasm_instrument::gas_metering::ConstantCostRules;
 
     fn parse_wat(source: &str) -> Vec<u8> {

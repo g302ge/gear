@@ -30,8 +30,9 @@ use frame_support::traits::{
 };
 use gear_core::{
     ids::{CodeId, MessageId, ProgramId},
-    memory::{PageNumber, WasmPageNumber},
+    memory::PageNumber,
     message::{Dispatch, ExitCode, StoredDispatch},
+    program::Program as NativeProgram,
 };
 use primitive_types::H256;
 use sp_runtime::{
@@ -76,10 +77,10 @@ where
             let is_initialized = p.is_initialized();
             p.try_into().ok().and_then(|p: ActiveProgram| {
                 let code_id = CodeId::from_origin(p.code_hash);
-                T::CodeStorage::get_code(code_id).map(|c| {
+                T::CodeStorage::get_code(code_id).map(|code| {
                     NativeProgram::from_parts(
                         ProgramId::from_origin(id),
-                        c,
+                        code,
                         p.persistent_pages,
                         is_initialized,
                     )
@@ -113,7 +114,6 @@ where
         &self,
         program_id: ProgramId,
         code_id: CodeId,
-        static_pages: WasmPageNumber,
         message_id: H256,
     ) {
         assert!(
@@ -516,13 +516,12 @@ where
     }
 
     fn store_new_programs(&mut self, code_id: CodeId, candidates: Vec<(ProgramId, MessageId)>) {
-        if let Some(code) = T::CodeStorage::get_code(code_id) {
+        if let Some(_) = T::CodeStorage::get_code(code_id) {
             for (candidate_id, init_message) in candidates {
                 if !GearProgramPallet::<T>::program_exists(candidate_id.into_origin()) {
                     self.set_program(
                         candidate_id,
                         code_id,
-                        code.static_pages(),
                         init_message.into_origin(),
                     );
                 } else {

@@ -37,14 +37,14 @@ mod tests;
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
-    use common::{self, Origin, Program};
+    use common::{self, Origin, Program, CodeStorage};
     use core::fmt;
     use frame_support::{
         dispatch::DispatchResultWithPostInfo, pallet_prelude::*, storage::PrefixIterator,
     };
     use frame_system::pallet_prelude::*;
     use gear_core::{
-        ids::ProgramId,
+        ids::{ProgramId, CodeId},
         memory::{PageNumber, WasmPageNumber},
         message::{StoredDispatch, StoredMessage},
     };
@@ -61,6 +61,9 @@ pub mod pallet {
 
         /// Weight information for extrinsics in this pallet.
         type WeightInfo: WeightInfo;
+
+        /// LOL
+        type CodeStorage: CodeStorage;
     }
 
     #[pallet::pallet]
@@ -168,18 +171,6 @@ pub mod pallet {
                 }
             }
 
-            // PrefixIterator::<(H256, Program)>::new(
-            //     common::STORAGE_PROGRAM_PREFIX.to_vec(),
-            //     common::STORAGE_PROGRAM_PREFIX.to_vec(),
-            //     |key, mut value| {
-            //         assert_eq!(key.len(), 32);
-            //         let program_id = H256::from_slice(key);
-            //         let program = Program::decode(&mut value)?;
-            //         Ok((program_id, program))
-            //     },
-            // )
-            // .for_each(|(id, _)| log::debug!("program id = {}", id));
-
             let programs = PrefixIterator::<(H256, Program)>::new(
                 common::STORAGE_PROGRAM_PREFIX.to_vec(),
                 common::STORAGE_PROGRAM_PREFIX.to_vec(),
@@ -195,7 +186,8 @@ pub mod pallet {
                     Program::Active(active) => active,
                     _ => return Some(ProgramDetails {id, state: ProgramState::Terminated}),
                 };
-                let static_pages = match common::get_code(active.code_hash) {
+                let code_id = CodeId::from_origin(active.code_hash);
+                let static_pages = match T::CodeStorage::get_code(code_id) {
                     Some(code) => code.static_pages(),
                     None => WasmPageNumber(0),
                 };

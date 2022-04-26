@@ -17,7 +17,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use alloc::collections::BTreeSet;
-use common::{lazy_pages, ExitCode};
+use common::lazy_pages;
 use core_processor::{
     configs::{AllocationsConfig, BlockInfo},
     Ext, ProcessorExt,
