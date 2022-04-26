@@ -98,9 +98,23 @@ impl DebugInfo for () {
 pub mod pallet {
     use super::*;
 
-    use frame_support::pallet_prelude::*;
+    use alloc::format;
+    use common::{
+        self, lazy_pages, CodeMetadata, DAGBasedLedger, GasPrice, Origin, Program, ProgramState,
+    };
+    use core_processor::{
+        common::{DispatchOutcome as CoreDispatchOutcome, ExecutableActor, JournalNote},
+        configs::BlockInfo,
+        Ext,
+    };
+    use frame_support::{
+        dispatch::{DispatchError, DispatchResultWithPostInfo},
+        pallet_prelude::*,
+        traits::{BalanceStatus, Currency, Get, LockableCurrency, ReservableCurrency},
+    };
     use frame_system::pallet_prelude::*;
 
+    use crate::ext::LazyPagesExt;
     use crate::manager::{ExtManager, HandleKind};
 
     #[pallet::config]
@@ -577,24 +591,38 @@ pub mod pallet {
 
             while let Some(queued_dispatch) = common::dequeue_dispatch() {
                 let actor_id = queued_dispatch.destination();
+
+                let lazy_pages_enabled = lazy_pages::try_to_enable_lazy_pages();
+
                 let actor = ext_manager
-                    .get_executable_actor(actor_id.into_origin())
+                    .get_executable_actor(actor_id.into_origin(), !lazy_pages_enabled)
                     .ok_or_else(|| b"Program not found in the storage".to_vec())?;
 
-                let journal = core_processor::process::<
-                    ext::LazyPagesExt,
-                    SandboxEnvironment<ext::LazyPagesExt>,
-                >(
-                    Some(actor),
-                    queued_dispatch.into_incoming(initial_gas),
-                    block_info,
-                    existential_deposit,
-                    ProgramId::from_origin(source),
-                    actor_id,
-                    u64::MAX,
-                    T::OutgoingLimit::get(),
-                    schedule.host_fn_weights.clone().into_core(),
-                );
+                let journal = if lazy_pages_enabled {
+                    core_processor::process::<LazyPagesExt, SandboxEnvironment<_>>(
+                        Some(actor),
+                        queued_dispatch.into_incoming(initial_gas),
+                        block_info,
+                        existential_deposit,
+                        ProgramId::from_origin(source),
+                        actor_id,
+                        u64::MAX,
+                        T::OutgoingLimit::get(),
+                        schedule.host_fn_weights.clone().into_core(),
+                    )
+                } else {
+                    core_processor::process::<Ext, SandboxEnvironment<_>>(
+                        Some(actor),
+                        queued_dispatch.into_incoming(initial_gas),
+                        block_info,
+                        existential_deposit,
+                        ProgramId::from_origin(source),
+                        actor_id,
+                        u64::MAX,
+                        T::OutgoingLimit::get(),
+                        schedule.host_fn_weights.clone().into_core(),
+                    )
+                };
 
                 core_processor::handle_journal(journal.clone(), &mut ext_manager);
 
@@ -728,6 +756,7 @@ pub mod pallet {
                     );
 
                     let schedule = T::Schedule::get();
+                    let lazy_pages_enabled = lazy_pages::try_to_enable_lazy_pages();
                     let program_id = dispatch.destination();
                     let current_message_id = dispatch.id();
                     let maybe_message_reply = dispatch.reply();
@@ -780,7 +809,7 @@ pub mod pallet {
                                 continue;
                             }
 
-                            let native_program = NativeProgram::from_parts(
+                            let program = NativeProgram::from_parts(
                                 program_id,
                                 code,
                                 prog.persistent_pages,
@@ -792,13 +821,25 @@ pub mod pallet {
                             )
                             .unique_saturated_into();
 
+                            let pages_data = if lazy_pages_enabled {
+                                Default::default()
+                            } else {
+                                common::get_program_pages_data(
+                                    program_id.into_origin(),
+                                    program
+                                        .get_pages()
+                                        .iter()
+                                        .flat_map(|p| p.to_gear_pages_iter()),
+                                )
+                            };
+
                             Some(ExecutableActor {
-                                program: native_program,
+                                program,
                                 balance,
+                                pages_data,
                             })
                         } else {
                             log::debug!("Program '{:?}' is not active", program_id,);
-
                             None
                         }
                     } else {
@@ -809,20 +850,31 @@ pub mod pallet {
                         "Gas node is guaranteed to exist for the key due to earlier checks",
                     );
 
-                    let journal = core_processor::process::<
-                        ext::LazyPagesExt,
-                        SandboxEnvironment<ext::LazyPagesExt>,
-                    >(
-                        maybe_active_actor,
-                        dispatch.into_incoming(gas_limit),
-                        block_info,
-                        existential_deposit,
-                        ProgramId::from_origin(origin),
-                        program_id,
-                        Self::gas_allowance(),
-                        T::OutgoingLimit::get(),
-                        schedule.host_fn_weights.into_core(),
-                    );
+                    let journal = if lazy_pages_enabled {
+                        core_processor::process::<LazyPagesExt, SandboxEnvironment<_>>(
+                            maybe_active_actor,
+                            dispatch.into_incoming(gas_limit),
+                            block_info,
+                            existential_deposit,
+                            ProgramId::from_origin(origin),
+                            program_id,
+                            Self::gas_allowance(),
+                            T::OutgoingLimit::get(),
+                            schedule.host_fn_weights.into_core(),
+                        )
+                    } else {
+                        core_processor::process::<Ext, SandboxEnvironment<_>>(
+                            maybe_active_actor,
+                            dispatch.into_incoming(gas_limit),
+                            block_info,
+                            existential_deposit,
+                            ProgramId::from_origin(origin),
+                            program_id,
+                            Self::gas_allowance(),
+                            T::OutgoingLimit::get(),
+                            schedule.host_fn_weights.into_core(),
+                        )
+                    };
 
                     core_processor::handle_journal(journal, &mut ext_manager);
 

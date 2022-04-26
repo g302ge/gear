@@ -73,6 +73,9 @@ impl Error {
 /// Page buffer.
 pub type PageBuf = [u8; GEAR_PAGE_SIZE];
 
+/// TODO
+pub type WasmPageBuf = [u8; WASM_PAGE_SIZE];
+
 /// Page number.
 #[derive(
     Clone,
@@ -92,6 +95,11 @@ pub type PageBuf = [u8; GEAR_PAGE_SIZE];
 pub struct PageNumber(pub u32);
 
 impl PageNumber {
+    /// TODO
+    pub fn new_from_addr(addr: usize) -> Self {
+        Self((addr / Self::size()) as u32)
+    }
+
     /// Return page offset.
     pub fn offset(&self) -> usize {
         (self.0 as usize) * PageNumber::size()
@@ -145,6 +153,11 @@ impl core::ops::Sub<PageNumber> for PageNumber {
 pub struct WasmPageNumber(pub u32);
 
 impl WasmPageNumber {
+    /// TODO
+    pub fn new_from_addr(addr: usize) -> Self {
+        Self((addr / Self::size()) as u32)
+    }
+
     /// Amount of gear pages in current amount of wasm pages.
     /// Or the same: number of first gear page in current wasm page.
     pub fn to_gear_pages(&self) -> PageNumber {
@@ -154,6 +167,12 @@ impl WasmPageNumber {
     /// Return page size in bytes.
     pub const fn size() -> usize {
         WASM_PAGE_SIZE
+    }
+
+    /// TODO
+    pub fn to_gear_pages_iter(&self) -> impl Iterator<Item = PageNumber> {
+        let page = self.to_gear_pages();
+        (page.0..page.0 + PageNumber::num_in_one_wasm_page()).map(PageNumber)
     }
 }
 
@@ -171,69 +190,6 @@ impl core::ops::Sub for WasmPageNumber {
     fn sub(self, other: Self) -> Self {
         Self(self.0.saturating_sub(other.0))
     }
-}
-
-/// Transforms pages set to wasm pages set.
-/// If `pages_iter` contains all pages from any wasm page
-/// then we will include this wasm page in result set.
-/// If there is wasm pages, for which `pages_iter` contains not all pages,
-/// then returns Err.
-///
-/// # Examples
-///
-/// We assume the one wasm page contains 16 gear pages.
-///
-/// ```
-/// # use std::collections::BTreeSet;
-/// # use gear_core::memory::{self, PageNumber, WasmPageNumber};
-///
-/// let gear_pages: BTreeSet<_> = vec![0..16, 48..64].into_iter().flatten().map(PageNumber).collect();
-/// let wasm_pages: BTreeSet<_> = [0, 3].map(WasmPageNumber).into();
-/// assert_eq!(memory::pages_to_wasm_pages_set(gear_pages.iter()), Ok(wasm_pages));
-///
-/// let gear_pages: BTreeSet<_> = vec![0..16, 50..66].into_iter().flatten().map(PageNumber).collect();
-/// assert!(memory::pages_to_wasm_pages_set(gear_pages.iter()).is_err());
-/// ```
-pub fn pages_to_wasm_pages_set<'a>(
-    pages_iter: impl Iterator<Item = &'a PageNumber>,
-) -> Result<BTreeSet<WasmPageNumber>, &'static str> {
-    let mut wasm_pages = BTreeSet::new();
-    pages_iter
-        .step_by(PageNumber::num_in_one_wasm_page() as _)
-        .try_for_each(|gp| {
-            if gp.0 % PageNumber::num_in_one_wasm_page() == 0 {
-                wasm_pages.insert(WasmPageNumber(gp.0 / PageNumber::num_in_one_wasm_page()));
-                Ok(())
-            } else {
-                Err("There is wasm page, which has not all gear pages in the begin")
-            }
-        })?;
-    Ok(wasm_pages)
-}
-
-/// Transforms wasm pages set to corresponding gear pages set.
-///
-/// # Examples
-///
-/// We assume the one wasm page contains 16 gear pages.
-///
-/// ```
-/// # use std::collections::BTreeSet;
-/// # use gear_core::memory::{self, PageNumber, WasmPageNumber};
-///
-/// let wasm_pages: BTreeSet<_> = [1, 5, 8].map(WasmPageNumber).into();
-/// let gear_pages: BTreeSet<_> = vec![16..32, 80..96, 128..144]
-///     .into_iter().flatten().map(PageNumber).collect();
-/// assert_eq!(memory::wasm_pages_to_pages_set(wasm_pages.iter()), gear_pages);
-/// ```
-pub fn wasm_pages_to_pages_set<'a>(
-    wasm_pages_iter: impl Iterator<Item = &'a WasmPageNumber>,
-) -> BTreeSet<PageNumber> {
-    wasm_pages_iter
-        .map(|wp| wp.to_gear_pages().0)
-        .flat_map(|gp| (gp..gp.saturating_add(PageNumber::num_in_one_wasm_page())))
-        .map(PageNumber)
-        .collect()
 }
 
 /// Memory interface for the allocator.
@@ -359,6 +315,11 @@ impl AllocationsContext {
     /// Return reference to the allocation manager.
     pub fn allocations(&self) -> &BTreeSet<WasmPageNumber> {
         &self.allocations
+    }
+
+    /// TODO
+    pub fn into_allocations(self) -> BTreeSet<WasmPageNumber> {
+        self.allocations
     }
 }
 

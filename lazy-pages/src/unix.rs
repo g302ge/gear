@@ -99,9 +99,9 @@ extern "C" fn handle_sigsegv(_x: i32, info: *mut siginfo_t, _z: *mut c_void) {
         };
 
         let res = sp_io::storage::read(&hash_key_in_storage, buffer_as_slice, 0);
-        assert!(res.is_some(), "Wasm page must have data in storage");
+        // assert!(res.is_some(), "Wasm page must have data in storage");
         assert!(
-            res.unwrap() as usize == PageNumber::size(),
+            res.is_none() || res.unwrap() as usize == PageNumber::size(),
             "Page data must contain {} bytes, actually has {}",
             PageNumber::size(),
             res.unwrap()

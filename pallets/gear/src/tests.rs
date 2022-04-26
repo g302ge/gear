@@ -381,7 +381,7 @@ fn unused_gas_released_back_works() {
 #[cfg(unix)]
 #[test]
 fn lazy_pages() {
-    use gear_core::memory::{wasm_pages_to_pages_set, PageNumber, WasmPageNumber};
+    use gear_core::memory::{PageNumber, WasmPageNumber};
     use gear_runtime_interface as gear_ri;
     use std::collections::BTreeSet;
 
@@ -476,7 +476,10 @@ fn lazy_pages() {
         // Checks that released pages + lazy pages == all pages
         let all_pages = {
             let all_wasm_pages: BTreeSet<WasmPageNumber> = (0..10u32).map(WasmPageNumber).collect();
-            wasm_pages_to_pages_set(all_wasm_pages.iter())
+            all_wasm_pages
+                .iter()
+                .flat_map(|p| p.to_gear_pages_iter())
+                .collect()
         };
         let mut res_pages = lazy_pages;
         res_pages.extend(released_pages.iter());
@@ -2383,8 +2386,13 @@ fn resume_program_works() {
             common::Program::Active(p) => p,
             _ => unreachable!(),
         };
-        let memory_pages = common::get_program_pages(program_id, program.persistent_pages)
-            .expect("program exists, so do pages");
+        let memory_pages = common::get_program_pages_data(
+            program_id,
+            program
+                .persistent_pages
+                .iter()
+                .flat_map(|p| p.to_gear_pages_iter()),
+        );
 
         assert_ok!(GearProgram::pause_program(program_id));
 

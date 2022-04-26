@@ -47,6 +47,7 @@ fn pause_program_works() {
         Pallet::<Test>::add_code(code_and_id, CodeMetadata::new([0; 32].into(), 1)).unwrap();
 
         let wasm_static_pages = WasmPageNumber(16);
+        let persistent_pages = (0..wasm_static_pages.0).map(WasmPageNumber).collect();
         let static_pages = wasm_static_pages.to_gear_pages();
         let memory_pages = {
             let mut pages = BTreeMap::new();
@@ -72,8 +73,7 @@ fn pause_program_works() {
         common::set_program(
             program_id,
             ActiveProgram {
-                static_pages: static_pages.to_wasm_page(),
-                persistent_pages: memory_pages.clone().into_keys().collect(),
+                persistent_pages,
                 code_hash,
                 state: ProgramState::Initialized,
             },
@@ -127,9 +127,8 @@ fn pause_program_works() {
         assert!(Pallet::<Test>::get_code(code_id).is_some());
 
         // although the memory pages should be removed
-        assert_eq!(
-            common::get_program_pages(program_id, memory_pages.into_keys().collect()),
-            None
+        assert!(
+            common::get_program_pages_data(program_id, memory_pages.keys().copied()).is_empty()
         );
 
         assert!(common::remove_waiting_message(program_id, msg_id_1).is_none());
@@ -150,11 +149,9 @@ fn pause_program_twice_fails() {
         Pallet::<Test>::add_code(code_and_id, CodeMetadata::new([0; 32].into(), 1)).unwrap();
 
         let program_id = H256::from_low_u64_be(1);
-        let static_pages = 256;
         common::set_program(
             program_id,
             ActiveProgram {
-                static_pages: static_pages.into(),
                 persistent_pages: Default::default(),
                 code_hash,
                 state: ProgramState::Initialized,
@@ -185,11 +182,9 @@ fn pause_terminated_program_fails() {
         Pallet::<Test>::add_code(code_and_id, CodeMetadata::new([0; 32].into(), 1)).unwrap();
 
         let program_id = H256::from_low_u64_be(1);
-        let static_pages = 256;
         common::set_program(
             program_id,
             ActiveProgram {
-                static_pages: static_pages.into(),
                 persistent_pages: Default::default(),
                 code_hash,
                 state: ProgramState::Initialized,
@@ -231,9 +226,8 @@ fn pause_uninitialized_program_works() {
         assert!(Pallet::<Test>::get_code(code_id).is_some());
 
         // although the memory pages should be removed
-        assert_eq!(
-            common::get_program_pages(program_id, memory_pages.into_keys().collect()),
-            None
+        assert!(
+            common::get_program_pages_data(program_id, memory_pages.keys().copied()).is_empty()
         );
 
         assert!(common::remove_waiting_message(program_id, msg_1.id().into_origin()).is_none());
@@ -275,8 +269,7 @@ fn resume_uninitialized_program_works() {
         assert!(!GearProgram::program_paused(program_id));
 
         let new_memory_pages =
-            common::get_program_pages(program_id, memory_pages.clone().into_keys().collect())
-                .unwrap();
+            common::get_program_pages_data(program_id, memory_pages.clone().keys().copied());
         assert_eq!(memory_pages, new_memory_pages);
 
         let waiting_init = common::waiting_init_take_messages(program_id);
@@ -445,6 +438,7 @@ mod utils {
 
         Pallet::<Test>::add_code(code_and_id, CodeMetadata::new([0; 32].into(), 1)).unwrap();
 
+        let persistent_pages = (0..wasm_static_pages.0).map(WasmPageNumber).collect();
         let static_pages = wasm_static_pages.to_gear_pages();
         let memory_pages = {
             let mut pages = BTreeMap::new();
@@ -470,8 +464,7 @@ mod utils {
         common::set_program(
             program_id,
             ActiveProgram {
-                static_pages: wasm_static_pages,
-                persistent_pages: memory_pages.clone().into_keys().collect(),
+                persistent_pages,
                 code_hash: code_id.into_origin(),
                 state: ProgramState::Uninitialized {
                     message_id: init_msg_id,

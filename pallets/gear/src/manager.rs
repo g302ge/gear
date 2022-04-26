@@ -32,7 +32,6 @@ use gear_core::{
     ids::{CodeId, MessageId, ProgramId},
     memory::{PageNumber, WasmPageNumber},
     message::{Dispatch, ExitCode, StoredDispatch},
-    program::Program as NativeProgram,
 };
 use primitive_types::H256;
 use sp_runtime::{
@@ -72,7 +71,7 @@ where
 {
     /// NOTE: By calling this function we can't differ whether `None` returned, because
     /// program with `id` doesn't exist or it's terminated
-    pub fn get_executable_actor(&self, id: H256) -> Option<ExecutableActor> {
+    pub fn get_executable_actor(&self, id: H256, with_pages: bool) -> Option<ExecutableActor> {
         let program = common::get_program(id).and_then(|p| {
             let is_initialized = p.is_initialized();
             p.try_into().ok().and_then(|p: ActiveProgram| {
@@ -91,8 +90,23 @@ where
         let balance =
             <T as Config>::Currency::free_balance(&<T::AccountId as Origin>::from_origin(id))
                 .unique_saturated_into();
+        let pages_data = if with_pages {
+            common::get_program_pages_data(
+                id,
+                program
+                    .get_pages()
+                    .iter()
+                    .flat_map(|p| p.to_gear_pages_iter()),
+            )
+        } else {
+            Default::default()
+        };
 
-        Some(ExecutableActor { program, balance })
+        Some(ExecutableActor {
+            program,
+            balance,
+            pages_data,
+        })
     }
 
     pub fn set_program(
@@ -109,7 +123,6 @@ where
 
         // An empty program has been just constructed: it contains no persistent pages.
         let program = common::ActiveProgram {
-            static_pages,
             persistent_pages: Default::default(),
             code_hash: code_id.into_origin(),
             state: common::ProgramState::Uninitialized { message_id },
@@ -437,29 +450,31 @@ where
         }
     }
 
-    fn update_page(
-        &mut self,
-        program_id: ProgramId,
-        page_number: PageNumber,
-        data: Option<Vec<u8>>,
-    ) {
+    fn update_page_data(&mut self, program_id: ProgramId, page_number: PageNumber, data: Vec<u8>) {
         let program_id = program_id.into_origin();
-
         let program = common::get_program(program_id)
             .expect("page update guaranteed to be called only for existing and active program");
+        if let Program::Active(_) = program {
+            common::set_program_page_data(program_id, page_number, data);
+        };
+    }
 
+    fn update_persistent_pages(
+        &mut self,
+        program_id: ProgramId,
+        allocations: BTreeSet<gear_core::memory::WasmPageNumber>,
+    ) {
+        let program_id = program_id.into_origin();
+        let program = common::get_program(program_id)
+            .expect("page update guaranteed to be called only for existing and active program");
         if let Program::Active(prog) = program {
-            let mut persistent_pages = prog.persistent_pages;
-
-            if let Some(data) = data {
-                persistent_pages.insert(page_number);
-                common::set_program_page(program_id, page_number, data);
-            } else {
-                persistent_pages.remove(&page_number);
-                common::remove_program_page(program_id, page_number);
+            let removed_pages = prog.persistent_pages.difference(&allocations);
+            for wasm_page in removed_pages {
+                for page in wasm_page.to_gear_pages_iter() {
+                    common::remove_program_page_data(program_id, page);
+                }
             }
-
-            common::set_program_persistent_pages(program_id, persistent_pages);
+            common::set_program_persistent_pages(program_id, allocations);
         };
     }
 

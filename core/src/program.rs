@@ -21,15 +21,11 @@
 use crate::{
     code::InstrumentedCode,
     ids::ProgramId,
-    memory::{PageBuf, PageNumber, WasmPageNumber},
+    memory::WasmPageNumber,
 };
-use alloc::{boxed::Box, collections::BTreeMap, collections::BTreeSet, vec::Vec};
+use alloc::collections::BTreeSet;
 use anyhow::Result;
 use codec::{Decode, Encode};
-use core::convert::TryFrom;
-
-/// Type alias for map of persistent pages.
-pub type PersistentPageMap = BTreeMap<PageNumber, Option<Box<PageBuf>>>;
 
 /// Program.
 #[derive(Clone, Debug, Decode, Encode)]
@@ -37,7 +33,7 @@ pub struct Program {
     id: ProgramId,
     code: InstrumentedCode,
     /// Saved state of memory pages.
-    persistent_pages: PersistentPageMap,
+    allocations: BTreeSet<WasmPageNumber>,
     /// Program is initialized.
     is_initialized: bool,
 }
@@ -48,7 +44,7 @@ impl Program {
         Program {
             id,
             code,
-            persistent_pages: Default::default(),
+            allocations: Default::default(),
             is_initialized: false,
         }
     }
@@ -57,16 +53,13 @@ impl Program {
     pub fn from_parts(
         id: ProgramId,
         code: InstrumentedCode,
-        persistent_pages_numbers: BTreeSet<PageNumber>,
+        persistent_pages_numbers: BTreeSet<WasmPageNumber>,
         is_initialized: bool,
     ) -> Self {
         Self {
             id,
             code,
-            persistent_pages: persistent_pages_numbers
-                .into_iter()
-                .map(|k| (k, None))
-                .collect(),
+            allocations: persistent_pages_numbers,
             is_initialized,
         }
     }
@@ -105,72 +98,61 @@ impl Program {
     }
 
     /// Set memory from buffer.
-    pub fn set_memory(&mut self, buffer: &[u8]) -> Result<()> {
-        self.persistent_pages.clear();
-        let boxed_slice: Box<[u8]> = buffer.into();
-        // TODO: also alloc remainder.
-        for (num, buf) in boxed_slice.chunks_exact(PageNumber::size()).enumerate() {
-            self.set_page((num as u32 + 1).into(), buf)?;
-        }
-        Ok(())
-    }
+    // pub fn set_memory(&mut self, buffer: &[u8]) -> Result<()> {
+    //     self.allocations.clear();
+    //     let boxed_slice: Box<[u8]> = buffer.into();
+    //     // TODO: also alloc remainder.
+    //     for (num, buf) in boxed_slice.chunks_exact(PageNumber::size()).enumerate() {
+    //         self.set_page((num as u32 + 1).into(), buf)?;
+    //     }
+    //     Ok(())
+    // }
 
     /// Setting multiple pages
-    pub fn set_pages(&mut self, pages: BTreeMap<PageNumber, Vec<u8>>) -> Result<()> {
-        for (page_num, page_data) in pages {
-            self.set_page(page_num, &page_data)?;
-        }
-        Ok(())
-    }
+    // pub fn set_pages(&mut self, pages: BTreeMap<WasmPageNumber, Vec<u8>>) -> Result<()> {
+    //     for (page_num, page_data) in pages {
+    //         self.set_page(page_num, &page_data)?;
+    //     }
+    //     Ok(())
+    // }
 
     /// Set memory page from buffer.
-    pub fn set_page(&mut self, page: PageNumber, buf: &[u8]) -> Result<()> {
-        self.persistent_pages.insert(
-            page,
-            Option::from(Box::new(
-                PageBuf::try_from(buf)
-                    .map_err(|err| anyhow::format_err!("TryFromSlice err: {}", err))?,
-            )),
-        );
+    pub fn add_allocation(&mut self, page: WasmPageNumber) -> Result<()> {
+        self.allocations.insert(page);
         Ok(())
     }
 
     /// Remove memory page from buffer.
-    pub fn remove_page(&mut self, page: PageNumber) {
-        self.persistent_pages.remove(&page);
+    pub fn remove_page(&mut self, page: WasmPageNumber) {
+        self.allocations.remove(&page);
     }
 
     /// Get reference to memory pages.
-    pub fn get_pages(&self) -> &PersistentPageMap {
-        &self.persistent_pages
+    pub fn get_pages(&self) -> &BTreeSet<WasmPageNumber> {
+        &self.allocations
     }
 
     /// Get mut reference to memory pages.
-    pub fn get_pages_mut(&mut self) -> &mut PersistentPageMap {
-        &mut self.persistent_pages
+    pub fn get_pages_mut(&mut self) -> &mut BTreeSet<WasmPageNumber> {
+        &mut self.allocations
     }
 
     /// Get reference to memory page.
-    #[allow(clippy::borrowed_box)]
-    pub fn get_page_data(&self, page: PageNumber) -> Option<&Box<PageBuf>> {
-        let res = self.persistent_pages.get(&page);
-        res.expect("Page must be in persistent_pages").as_ref()
-    }
+    // #[allow(clippy::borrowed_box)]
+    // pub fn get_page_data(&self, page: WasmPageNumber) -> Option<&Box<WasmPageBuf>> {
+    //     let res = self.allocations.get(&page);
+    //     res.expect("Page must be in persistent_pages").as_ref()
+    // }
 
-    /// Get mut reference to memory page.
-    pub fn get_page_mut(&mut self, page: PageNumber) -> Option<&mut Box<PageBuf>> {
-        let res = self.persistent_pages.get_mut(&page);
-        res.expect("Page must be in persistent_pages; mut").as_mut()
-    }
+    // /// Get mut reference to memory page.
+    // pub fn get_page_mut(&mut self, page: WasmPageNumber) -> Option<&mut Box<WasmPageBuf>> {
+    //     let res = self.allocations.get_mut(&page);
+    //     res.expect("Page must be in persistent_pages; mut").as_mut()
+    // }
 
     /// Clear static area of this program.
     pub fn clear_memory(&mut self) {
-        self.persistent_pages.clear();
-    }
-
-    /// Decomposes this instance into tuple of binary code and persistent pages.
-    pub fn into_parts(self) -> (Vec<u8>, PersistentPageMap) {
-        (self.code.into_code(), self.persistent_pages)
+        self.allocations.clear();
     }
 }
 
@@ -234,11 +216,9 @@ mod tests {
         // 2 static pages
         assert_eq!(program.static_pages(), 2.into());
 
-        assert!(program.set_page(1.into(), &[0; 123]).is_err());
+        // assert!(program.add_allocation(1.into(), &[0; 123]).is_err());
 
-        assert!(program
-            .set_page(1.into(), &vec![0; PageNumber::size()])
-            .is_ok());
+        assert!(program.add_allocation(1.into()).is_ok());
         assert_eq!(program.get_pages().len(), 1);
     }
 }

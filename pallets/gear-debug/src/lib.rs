@@ -168,6 +168,18 @@ pub mod pallet {
                 }
             }
 
+            // PrefixIterator::<(H256, Program)>::new(
+            //     common::STORAGE_PROGRAM_PREFIX.to_vec(),
+            //     common::STORAGE_PROGRAM_PREFIX.to_vec(),
+            //     |key, mut value| {
+            //         assert_eq!(key.len(), 32);
+            //         let program_id = H256::from_slice(key);
+            //         let program = Program::decode(&mut value)?;
+            //         Ok((program_id, program))
+            //     },
+            // )
+            // .for_each(|(id, _)| log::debug!("program id = {}", id));
+
             let programs = PrefixIterator::<(H256, Program)>::new(
                 common::STORAGE_PROGRAM_PREFIX.to_vec(),
                 common::STORAGE_PROGRAM_PREFIX.to_vec(),
@@ -178,18 +190,30 @@ pub mod pallet {
                     Ok((program_id, program))
                 },
             )
-            .map(|(id, p)| ProgramDetails {
-                id,
-                state: if let Program::Active(active) = p {
-                    ProgramState::Active(ProgramInfo {
-                        static_pages: active.static_pages,
-                        persistent_pages: common::get_program_pages(id, active.persistent_pages)
-                            .expect("active program exists, therefore pages do"),
-                        code_hash: active.code_hash,
-                    })
-                } else {
-                    ProgramState::Terminated
-                },
+            .filter_map(|(id, p)| {
+                let active = match p {
+                    Program::Active(active) => active,
+                    _ => return Some(ProgramDetails {id, state: ProgramState::Terminated}),
+                };
+                let static_pages = match common::get_code(active.code_hash) {
+                    Some(code) => code.static_pages(),
+                    None => WasmPageNumber(0),
+                };
+                Some(ProgramDetails {
+                    id,
+                    state: {
+                        let pages = active
+                            .persistent_pages
+                            .iter()
+                            .flat_map(|p| p.to_gear_pages_iter());
+                        // log::debug!("+_+_+ program id = {}", id);
+                        ProgramState::Active(ProgramInfo {
+                            static_pages,
+                            persistent_pages: common::get_program_pages_data(id, pages),
+                            code_hash: active.code_hash,
+                        })
+                    },
+                })
             })
             .collect();
 

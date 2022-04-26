@@ -60,12 +60,16 @@ impl<T: Config> pallet::Pallet<T> {
         let prefix = common::wait_prefix(program_id);
         let previous_key = prefix.clone();
 
+        let pages: Vec<PageNumber> = program
+            .persistent_pages
+            .iter()
+            .flat_map(|p| p.to_gear_pages_iter())
+            .collect();
+        let pages_data = common::get_program_pages_data(program_id, pages.into_iter());
+
         let paused_program = PausedProgram {
             program_id,
-            pages_hash: memory_pages_hash(
-                &common::get_program_pages(program_id, program.persistent_pages.clone())
-                    .expect("pause_program: active program exists, therefore pages do"),
-            ),
+            pages_hash: memory_pages_hash(&pages_data),
             program,
             wait_list_hash: wait_list_hash(
                 &PrefixIterator::<_, ()>::new(prefix, previous_key, decode_dispatch_tuple)

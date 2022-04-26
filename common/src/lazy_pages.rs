@@ -23,53 +23,49 @@ use core::convert::TryFrom;
 use gear_core::ids::ProgramId;
 use gear_core::memory::{PageBuf, PageNumber};
 use gear_runtime_interface::gear_ri;
-use sp_std::{boxed::Box, collections::btree_map::BTreeMap, vec::Vec};
+use sp_std::{boxed::Box, collections::{btree_map::BTreeMap, btree_set::BTreeSet}, vec::Vec};
 
 fn mprotect_lazy_pages(addr: u64, protect: bool) -> Result<(), &'static str> {
     gear_ri::mprotect_lazy_pages(addr, protect).map_err(|_| "Cannot mprotect some pages")
 }
 
 /// Try to enable and initialize lazy pages env
-pub fn try_to_enable_lazy_pages(
-    program_id: ProgramId,
-    memory_pages: &mut BTreeMap<PageNumber, Option<Box<PageBuf>>>,
-) -> Result<bool, &'static str> {
-    // Each page, which has no data in `memory_pages` is supposed to be lazy page candidate
-    if !memory_pages.iter().any(|(_, buf)| buf.is_none()) {
-        log::debug!("lazy-pages: there is no pages to be lazy");
-        Ok(false)
-    } else if cfg!(feature = "disable_lazy_pages") || !gear_ri::init_lazy_pages() {
+pub fn try_to_enable_lazy_pages() -> bool {
+    if cfg!(feature = "disable_lazy_pages") || !gear_ri::init_lazy_pages() {
         // TODO: lazy-pages must be disabled in validators in relay-chain,
         // but it can be fixed in future only.
-
-        // In case we cannot enable lazy-pages, then we loads now data for all pages, which has no data.
-        let prog_id_hash = program_id.into_origin();
-        for (page, buff) in memory_pages.iter_mut().filter(|(_x, y)| y.is_none()) {
-            let data = crate::get_program_page_data(prog_id_hash, *page)
-                .ok_or("Cannot find page data in storage")?;
-            let page_data =
-                PageBuf::try_from(data).map_err(|_| "Cannot convert vec to page data")?;
-            buff.replace(Box::from(page_data));
-        }
         log::debug!("lazy-pages: disabled or unsupported");
-        Ok(false)
+        false
     } else {
         log::debug!("lazy-pages: enabled");
-        Ok(true)
+        true
     }
+}
+
+/// For every page which has no data in btree map
+/// we download data from storage if there is data for this page in storage.
+pub fn download_pages_data(
+    prog_id: ProgramId,
+    memory_pages: &BTreeSet<PageNumber>,
+) -> Result<BTreeMap<PageNumber, Box<PageBuf>>, &'static str> {
+    let prog_id_hash = prog_id.into_origin();
+    let mut pages_data = BTreeMap::new();
+    for page in memory_pages {
+        if let Some(data) = crate::get_program_page_data(prog_id_hash, *page) {
+            let page_data =
+                PageBuf::try_from(data).map_err(|_| "Cannot convert vec to page data")?;
+            pages_data.insert(*page, Box::new(page_data));
+        }
+    }
+    Ok(pages_data)
 }
 
 /// Protect and save storage keys for pages which has no data
 pub fn protect_pages_and_init_info(
-    memory_pages: &BTreeMap<PageNumber, Option<Box<PageBuf>>>,
+    lazy_pages: &BTreeSet<PageNumber>,
     prog_id: ProgramId,
     wasm_mem_begin_addr: u64,
 ) -> Result<(), &'static str> {
-    let lazy_pages = memory_pages
-        .iter()
-        .filter(|(_num, buf)| buf.is_none())
-        .map(|(num, _buf)| *num)
-        .collect::<Vec<_>>();
     let prog_id_hash = prog_id.into_origin();
 
     gear_ri::reset_lazy_pages_info();
@@ -85,17 +81,22 @@ pub fn protect_pages_and_init_info(
 
 /// Lazy pages contract post execution actions
 pub fn post_execution_actions(
-    memory_pages: &mut BTreeMap<PageNumber, Option<Box<PageBuf>>>,
+    memory_pages: &mut BTreeMap<PageNumber, Box<PageBuf>>,
     wasm_mem_begin_addr: u64,
 ) -> Result<(), &'static str> {
-    // Loads data for released lazy pages. Data which was before execution.
+    // Set data for accessed lazy pages. Data which was before execution.
     let released_pages = gear_ri::get_released_pages();
     for page in released_pages {
         let data = gear_ri::get_released_page_old_data(page)
-            .map_err(|_| "Some of released pages has no data in released pages data map")?;
+            .map_err(|_| "Some of released pages has no data")?;
         let page_data =
             PageBuf::try_from(data).map_err(|_| "Cannot convert page data to page buff")?;
-        memory_pages.insert(page.into(), Option::from(Box::new(page_data)));
+        if memory_pages
+            .insert(page.into(), Box::new(page_data))
+            .is_some()
+        {
+            return Err("RUNTIME ERROR: all released pages must have no data in @memory_pages arg");
+        };
     }
 
     // Removes protections from lazy pages

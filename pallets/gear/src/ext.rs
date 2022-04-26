@@ -16,7 +16,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use common::lazy_pages;
+use alloc::collections::BTreeSet;
+use common::{lazy_pages, ExitCode};
 use core_processor::{
     configs::{AllocationsConfig, BlockInfo},
     Ext, ProcessorExt,
@@ -27,9 +28,7 @@ use gear_core::{
     env::Ext as EnvExt,
     gas::{GasAllowanceCounter, GasAmount, GasCounter, ValueCounter},
     ids::{CodeId, MessageId, ProgramId},
-    memory::{
-        wasm_pages_to_pages_set, AllocationsContext, Memory, PageBuf, PageNumber, WasmPageNumber,
-    },
+    memory::{AllocationsContext, Memory, PageBuf, PageNumber, WasmPageNumber},
     message::{HandlePacket, MessageContext, ReplyPacket},
 };
 use sp_std::{boxed::Box, collections::btree_map::BTreeMap, vec, vec::Vec};
@@ -37,7 +36,6 @@ use sp_std::{boxed::Box, collections::btree_map::BTreeMap, vec, vec::Vec};
 /// Ext with lazy pages support
 pub struct LazyPagesExt {
     inner: Ext,
-    lazy_pages_enabled: bool,
 }
 
 impl IntoExtInfo for LazyPagesExt {
@@ -46,14 +44,16 @@ impl IntoExtInfo for LazyPagesExt {
         mut get_page_data: F,
     ) -> Result<ExtInfo, (&'static str, GasAmount)> {
         // accessed pages are all pages except current lazy pages
-        let pages = wasm_pages_to_pages_set(self.inner.allocations_context.allocations().iter());
+        let allocations = self.inner.allocations_context.allocations().clone();
+        let pages: BTreeSet<PageNumber> = allocations
+            .iter()
+            .flat_map(|p| p.to_gear_pages_iter())
+            .collect();
         let mut accessed_pages = pages.clone();
-        if self.lazy_pages_enabled {
-            let lazy_pages_numbers = lazy_pages::get_lazy_pages_numbers();
-            lazy_pages_numbers.into_iter().for_each(|p| {
-                accessed_pages.remove(&p);
-            });
-        }
+        let lazy_pages_numbers = lazy_pages::get_lazy_pages_numbers();
+        lazy_pages_numbers.into_iter().for_each(|p| {
+            accessed_pages.remove(&p);
+        });
 
         log::trace!("accessed pages numbers = {:?}", accessed_pages);
 
@@ -71,7 +71,7 @@ impl IntoExtInfo for LazyPagesExt {
 
         Ok(ExtInfo {
             gas_amount: self.inner.gas_counter.into(),
-            pages,
+            allocations,
             pages_data: accessed_pages_data,
             generated_dispatches,
             awakening,
@@ -121,43 +121,26 @@ impl ProcessorExt for LazyPagesExt {
                 program_candidates_data,
                 host_fn_weights,
             },
-            lazy_pages_enabled: false,
         }
     }
 
-    fn try_to_enable_lazy_pages(
-        &mut self,
-        program_id: ProgramId,
-        memory_pages: &mut BTreeMap<PageNumber, Option<Box<PageBuf>>>,
-    ) -> Result<bool, &'static str> {
-        self.lazy_pages_enabled = lazy_pages::try_to_enable_lazy_pages(program_id, memory_pages)?;
-        Ok(self.lazy_pages_enabled)
+    fn is_lazy_pages_enabled() -> bool {
+        true
     }
 
-    fn protect_pages_and_init_info(
-        memory_pages: &BTreeMap<PageNumber, Option<Box<PageBuf>>>,
+    fn lazy_pages_protect_and_init_info(
+        memory_pages: &BTreeSet<PageNumber>,
         prog_id: ProgramId,
         wasm_mem_begin_addr: u64,
     ) -> Result<(), &'static str> {
         lazy_pages::protect_pages_and_init_info(memory_pages, prog_id, wasm_mem_begin_addr)
     }
 
-    fn post_execution_actions(
-        memory_pages: &mut BTreeMap<PageNumber, Option<Box<PageBuf>>>,
+    fn lazy_pages_post_execution_actions(
+        memory_pages: &mut BTreeMap<PageNumber, Box<PageBuf>>,
         wasm_mem_begin_addr: u64,
     ) -> Result<(), &'static str> {
         lazy_pages::post_execution_actions(memory_pages, wasm_mem_begin_addr)
-    }
-
-    fn remove_lazy_pages_prot(mem_addr: u64) -> Result<(), &'static str> {
-        lazy_pages::remove_lazy_pages_prot(mem_addr)
-    }
-
-    fn protect_lazy_pages_and_update_wasm_mem_addr(
-        old_mem_addr: u64,
-        new_mem_addr: u64,
-    ) -> Result<(), &'static str> {
-        lazy_pages::protect_lazy_pages_and_update_wasm_mem_addr(old_mem_addr, new_mem_addr)
     }
 }
 
@@ -183,16 +166,11 @@ impl EnvExt for LazyPagesExt {
         let old_mem_size = mem.size();
 
         // New pages allocation may change wasm memory buffer location.
-        // So, if lazy-pages are enabled we remove protections from lazy-pages
-        // and returns it back for new wasm memory buffer pages.
+        // So we remove protections from lazy-pages
+        // and set protection back for new wasm memory buffer pages.
         // Also we correct lazy-pages info if need.
-        let old_mem_addr = if self.lazy_pages_enabled {
-            let mem_addr = mem.get_wasm_memory_begin_addr();
-            LazyPagesExt::remove_lazy_pages_prot(mem_addr)?;
-            mem_addr
-        } else {
-            0
-        };
+        let old_mem_addr = mem.get_wasm_memory_begin_addr();
+        lazy_pages::remove_lazy_pages_prot(old_mem_addr)?;
 
         let result = self
             .inner
@@ -202,10 +180,8 @@ impl EnvExt for LazyPagesExt {
 
         let page_number = self.inner.return_and_store_err(result)?;
 
-        if self.lazy_pages_enabled {
-            let new_mem_addr = mem.get_wasm_memory_begin_addr();
-            LazyPagesExt::protect_lazy_pages_and_update_wasm_mem_addr(old_mem_addr, new_mem_addr)?;
-        }
+        let new_mem_addr = mem.get_wasm_memory_begin_addr();
+        lazy_pages::protect_lazy_pages_and_update_wasm_mem_addr(old_mem_addr, new_mem_addr)?;
 
         // Returns back greedily used gas for grow
         let new_mem_size = mem.size();

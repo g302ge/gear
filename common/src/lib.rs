@@ -49,7 +49,7 @@ use gear_core::{
     message::StoredDispatch,
 };
 
-pub use storage_queue::Iterator;
+pub use storage_queue::Iterator as QueueIter;
 pub use storage_queue::StorageQueue;
 
 pub const STORAGE_PROGRAM_PREFIX: &[u8] = b"g::prog::";
@@ -289,11 +289,16 @@ impl core::convert::TryFrom<Program> for ActiveProgram {
 
 #[derive(Clone, Debug, Decode, Encode, PartialEq, TypeInfo)]
 pub struct ActiveProgram {
-    pub static_pages: WasmPageNumber,
-    pub persistent_pages: BTreeSet<PageNumber>,
+    pub persistent_pages: BTreeSet<WasmPageNumber>,
     pub code_hash: H256,
     pub state: ProgramState,
 }
+
+// impl ActiveProgram {
+//     pub fn get_persistent_gear_pages(&self) -> BTreeSet<PageNumber> {
+//         wasm_pages_to_pages_set(self.persistent_pages.iter())
+//     }
+// }
 
 /// Enumeration contains variants for program state.
 #[derive(Clone, Debug, Decode, Encode, PartialEq, TypeInfo)]
@@ -400,17 +405,30 @@ pub fn save_page_lazy_info(id: H256, page_num: PageNumber) {
     gear_ri::gear_ri::save_page_lazy_info(page_num.0, &key);
 }
 
-pub fn get_program_pages(
+/// Returns data for all pages which has data in storage
+pub fn get_program_pages_data(
     id: H256,
-    pages: BTreeSet<PageNumber>,
-) -> Option<BTreeMap<PageNumber, Vec<u8>>> {
-    let mut persistent_pages = BTreeMap::new();
-    for page_num in pages {
-        let key = page_key(id, page_num);
-
-        persistent_pages.insert(page_num, sp_io::storage::get(&key)?);
-    }
-    Some(persistent_pages)
+    pages: impl Iterator<Item = PageNumber>,
+) -> BTreeMap<PageNumber, Vec<u8>> {
+    pages
+        .map(|p| {
+            let key = page_key(id, p);
+            (p, sp_io::storage::get(&key))
+        })
+        .filter_map(|(page, data)| {
+            if let Some(data) = data {
+                Some((page, data))
+            } else {
+                None
+            }
+        })
+        .collect()
+    // let mut persistent_pages = BTreeMap::new();
+    // for page_num in pages {
+    //     let key = page_key(id, *page_num);
+    //     persistent_pages.insert(*page_num, sp_io::storage::get(&key)?);
+    // }
+    // Some(persistent_pages)
 }
 
 pub fn set_program(
@@ -418,6 +436,7 @@ pub fn set_program(
     program: ActiveProgram,
     persistent_pages: BTreeMap<PageNumber, Vec<u8>>,
 ) {
+    log::debug!("set program with id = {}", id);
     for (page_num, page_buf) in persistent_pages {
         let key = page_key(id, page_num);
         sp_io::storage::set(&key, &page_buf);
@@ -450,24 +469,24 @@ pub fn queue_dispatch_first(dispatch: StoredDispatch) {
     dispatch_queue.queue_first(dispatch, id.into_origin());
 }
 
-pub fn dispatch_iter() -> Iterator<StoredDispatch> {
+pub fn dispatch_iter() -> QueueIter<StoredDispatch> {
     StorageQueue::get(STORAGE_MESSAGE_PREFIX).into_iter()
 }
 
-pub fn set_program_persistent_pages(id: H256, persistent_pages: BTreeSet<PageNumber>) {
+pub fn set_program_persistent_pages(id: H256, persistent_pages: BTreeSet<WasmPageNumber>) {
     if let Some(Program::Active(mut prog)) = get_program(id) {
         prog.persistent_pages = persistent_pages;
         sp_io::storage::set(&program_key(id), &Program::Active(prog).encode())
     }
 }
 
-pub fn set_program_page(program_id: H256, page_num: PageNumber, page_buf: Vec<u8>) {
+pub fn set_program_page_data(program_id: H256, page_num: PageNumber, page_buf: Vec<u8>) {
     let page_key = page_key(program_id, page_num);
 
     sp_io::storage::set(&page_key, &page_buf);
 }
 
-pub fn remove_program_page(program_id: H256, page_num: PageNumber) {
+pub fn remove_program_page_data(program_id: H256, page_num: PageNumber) {
     let page_key = page_key(program_id, page_num);
 
     sp_io::storage::clear(&page_key);

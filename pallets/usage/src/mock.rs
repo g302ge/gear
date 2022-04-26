@@ -296,21 +296,11 @@ pub(crate) fn set_program<T: pallet_gear::Config>(
     common::set_program(
         H256::from_slice(program.id().as_ref()),
         common::ActiveProgram {
-            static_pages: program.static_pages(),
-            persistent_pages: program.get_pages().iter().map(|(num, _)| *num).collect(),
+            persistent_pages: program.get_pages().clone(),
             code_hash,
             state: common::ProgramState::Initialized,
         },
-        program
-            .get_pages()
-            .iter()
-            .map(|(num, buf)| {
-                let buf = buf
-                    .as_ref()
-                    .expect("When set program, each page must have data");
-                (*num, buf.to_vec())
-            })
-            .collect(),
+        Default::default(),
     );
 
     program

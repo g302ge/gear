@@ -160,6 +160,7 @@ fn process_success(
         page_update,
         program_id,
         context_store,
+        allocations,
         ..
     } = dispatch_result;
 
@@ -213,6 +214,11 @@ fn process_success(
             data,
         })
     }
+
+    journal.push(JournalNote::UpdateWasmAllocations {
+        program_id,
+        allocations,
+    });
 
     match kind {
         Exit(value_destination) => {
